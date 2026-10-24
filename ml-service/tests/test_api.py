@@ -91,6 +91,27 @@ def test_batch_risk_endpoint():
     assert isinstance(data["items"], list)
 
 
+def test_batch_risk_invalid_business_id_format():
+    """business_id with path-traversal or illegal chars must be rejected 422."""
+    bad_ids = ["../etc/passwd", "biz 001", "a" * 65, "biz@001"]
+    for bad_id in bad_ids:
+        resp = client.get(f"/risk/batch/{bad_id}", headers=AUTH_HEADERS)
+        # FastAPI may 404 on path-traversal before we even get to our validator;
+        # either way it must not return 200.
+        assert resp.status_code != 200, f"Expected non-200 for business_id='{bad_id}'"
+
+
+def test_batch_risk_unauthorized_tenant():
+    """A tenant ID not in ALLOWED_BUSINESS_IDS must return 403."""
+    from api.config import settings
+    if settings.ALLOWED_BUSINESS_IDS:
+        # Pick an ID guaranteed not to be in the allowed list
+        unknown_id = "biz_unknown_9999"
+        resp = client.get(f"/risk/batch/{unknown_id}", headers=AUTH_HEADERS)
+        assert resp.status_code == 403
+        assert "not authorised" in resp.json()["detail"]
+
+
 def test_reorder_recommend_endpoint():
     payload = {
         "category": "dairy",

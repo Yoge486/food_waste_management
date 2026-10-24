@@ -49,14 +49,23 @@ def run_batch_waste_risk_assessment(
 
     df = pd.read_csv(inventory_file)
 
-    # Filter items matching the business ID in their name or notes if applicable
-    # In synthetic data, items are named like: "Whole Milk 1L (biz_001)"
+    # Filter items belonging to this business tenant.
+    # Synthetic data embeds the business_id in item names, e.g. "Whole Milk 1L (biz_001)".
+    # If no items match, return an empty result rather than leaking other tenants' data.
     if "name" in df.columns:
         biz_items = df[df["name"].str.contains(business_id, case=False, na=False)].copy()
-        if biz_items.empty:
-            biz_items = df.copy()  # Fallback to all items if business tag not present
     else:
         biz_items = df.copy()
+
+    if biz_items.empty:
+        return {
+            "business_id": business_id,
+            "evaluated_at": datetime.now().isoformat(),
+            "total_items": 0,
+            "high_or_critical_count": 0,
+            "average_risk_score": 0.0,
+            "items": [],
+        }
 
     # Load metrics to determine best model per category
     best_model_map = {}

@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
+import re
 from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
@@ -50,6 +51,9 @@ from risk.risk_scorer import calculate_waste_risk
 # Security: API Key validation
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
+# Valid business_id pattern: alphanumeric, underscores, hyphens, 1-64 chars
+_BUSINESS_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
+
 
 async def verify_api_key(api_key: Optional[str] = Security(API_KEY_HEADER)) -> str:
     """Validates the X-API-Key request header."""
@@ -64,6 +68,43 @@ async def verify_api_key(api_key: Optional[str] = Security(API_KEY_HEADER)) -> s
             detail="Invalid API Key provided.",
         )
     return api_key
+
+
+def verify_tenant_access(business_id: str) -> str:
+    """
+    Guards the batch endpoint: validates business_id format and checks it against
+    the list of IDs the current API key is permitted to access.
+
+    If ALLOWED_BUSINESS_IDS is empty (dev/single-tenant mode) any well-formed ID
+    is accepted — log a warning so operators notice.
+    """
+    if not _BUSINESS_ID_RE.match(business_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Invalid business_id '{business_id}'. "
+                "Only alphanumeric characters, hyphens, and underscores are allowed (max 64 chars)."
+            ),
+        )
+
+    allowed = settings.ALLOWED_BUSINESS_IDS
+    if not allowed:
+        # Dev / single-tenant mode — accept any valid ID but warn
+        print(
+            f"WARNING: ALLOWED_BUSINESS_IDS is not set. "
+            f"Accepting business_id='{business_id}' without tenant restriction."
+        )
+        return business_id
+
+    if business_id not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Access denied: this API key is not authorised to access "
+                f"business_id='{business_id}'."
+            ),
+        )
+    return business_id
 
 
 @asynccontextmanager
@@ -274,7 +315,9 @@ async def score_waste_risk(req: RiskScoreRequest):
     dependencies=[Depends(verify_api_key)],
     tags=["Risk Scoring"],
 )
-async def get_batch_risk(business_id: str):
+async def get_batch_risk(
+    business_id: str = Depends(verify_tenant_access),
+):
     """
     Retrieves or generates the latest batch waste risk assessment for a business tenant.
     """
