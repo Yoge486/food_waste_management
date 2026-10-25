@@ -168,3 +168,38 @@ class Transaction(models.Model):
 
     def __str__(self):
         return f'{self.business_id} | {self.date} | {self.category}'
+
+
+class POSApiKey(models.Model):
+    """
+    Per-tenant API key for the POS REST endpoint (M1 Req 1.3).
+    One business can have multiple keys (rotation support).
+    """
+    business = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='pos_api_keys',
+    )
+    key = models.CharField(max_length=64, unique=True, db_index=True)
+    label = models.CharField(max_length=100, default='Default POS key')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f'{self.business.username} — {self.label}'
+
+
+class POSIdempotencyKey(models.Model):
+    """
+    Stores idempotency keys submitted by POS clients.
+    If the same key is sent twice the second request returns the cached response
+    without creating a duplicate inventory row.
+    """
+    key = models.CharField(max_length=128, unique=True, db_index=True)
+    api_key = models.ForeignKey(POSApiKey, on_delete=models.CASCADE, related_name='idempotency_keys')
+    response_body = models.JSONField()          # cached JSON response
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'{self.key[:20]}…'

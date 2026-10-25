@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import DonationRequest, InventoryItem, SurplusListing, Transaction
+from .models import DonationRequest, InventoryItem, POSApiKey, POSIdempotencyKey, SurplusListing, Transaction
 
 
 @admin.register(InventoryItem)
@@ -31,3 +31,18 @@ class TransactionAdmin(admin.ModelAdmin):
     list_filter = ('category', 'date')
     search_fields = ('business__username', 'category')
     date_hierarchy = 'date'
+
+
+@admin.register(POSApiKey)
+class POSApiKeyAdmin(admin.ModelAdmin):
+    list_display = ('business', 'label', 'is_active', 'created_at', 'last_used_at')
+    list_filter = ('is_active',)
+    search_fields = ('business__username', 'label')
+    readonly_fields = ('key', 'created_at', 'last_used_at')
+
+
+@admin.register(POSIdempotencyKey)
+class POSIdempotencyKeyAdmin(admin.ModelAdmin):
+    list_display = ('key', 'api_key', 'created_at')
+    search_fields = ('key',)
+    readonly_fields = ('key', 'api_key', 'response_body', 'created_at')

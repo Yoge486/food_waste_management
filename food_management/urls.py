@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .pos_api import pos_inventory_ingest
 from .views import (
     admin_dashboard,
     admin_user_toggle_status,
@@ -26,6 +27,8 @@ from .views import (
 urlpatterns = [
     path('', dashboard, name='dashboard'),
     path('dashboard/metrics/', dashboard_metrics, name='dashboard_metrics'),
+    # POS REST API (M1 Req 1.3) — API-key auth, idempotency
+    path('api/pos/inventory/', pos_inventory_ingest, name='pos_inventory_ingest'),
     path('admin-panel/', admin_dashboard, name='admin_dashboard'),
     path('accounts/register/', register, name='register'),
     path('accounts/login/', login_view, name='login'),
