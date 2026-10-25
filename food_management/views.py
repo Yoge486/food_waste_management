@@ -27,7 +27,7 @@ from .forms import (
     UserRegistrationForm,
 )
 from .models import DonationRequest, InventoryItem, SurplusListing
-from .services import estimate_waste_risk, get_gamification_summary, get_leaderboard
+from .services import estimate_waste_risk, get_gamification_summary, get_leaderboard, record_transaction
 
 
 def dashboard(request):
@@ -296,6 +296,13 @@ def inventory_create(request):
             item = form.save(commit=False)
             item.business = request.user  # assign tenant owner
             item.save()
+            # Record a purchase transaction for the ML data pipeline
+            record_transaction(
+                business=request.user,
+                category=item.category,
+                purchase_qty=float(item.quantity),
+                unit=item.unit,
+            )
             profile, _ = UserProfile.objects.get_or_create(user=request.user)
             profile.points += 10
             profile.level = max(1, profile.points // 100 + 1)
@@ -414,6 +421,19 @@ def inventory_import(request):
                 ))
 
             InventoryItem.objects.bulk_create(imported_items)
+            # Record purchase transactions for imported items (aggregate by category)
+            from collections import defaultdict
+            cat_totals: dict = defaultdict(lambda: {'qty': 0.0, 'unit': 'kg'})
+            for imp_item in imported_items:
+                cat_totals[imp_item.category]['qty'] += float(imp_item.quantity)
+                cat_totals[imp_item.category]['unit'] = imp_item.unit
+            for cat, vals in cat_totals.items():
+                record_transaction(
+                    business=request.user,
+                    category=cat,
+                    purchase_qty=vals['qty'],
+                    unit=vals['unit'],
+                )
             if imported_items:
                 messages.success(request, f'Imported {len(imported_items)} inventory item(s).')
             if rejected_rows:
@@ -486,6 +506,13 @@ def donation_status_update(request, request_id):
             if next_status == 'collected':
                 donation.listing.status = 'collected'
                 donation.listing.save()
+                # Record donation quantity in Transaction for ML pipeline
+                record_transaction(
+                    business=request.user,
+                    category=donation.listing.category,
+                    donation_qty=float(donation.requested_quantity),
+                    unit=donation.listing.unit,
+                )
                 profile, _ = UserProfile.objects.get_or_create(user=request.user)
                 profile.points += 25
                 profile.level = max(1, profile.points // 100 + 1)
