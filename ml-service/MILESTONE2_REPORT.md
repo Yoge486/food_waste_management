@@ -147,7 +147,7 @@ $$\text{MAPE} = \frac{1}{N}\sum_{i=1}^N \frac{|y_i - \hat{y}_i|}{\max(|y_i|, 1.0
 ### Key Observations:
 1. **PyTorch LSTM** outperformed Prophet on highly volatile, short-shelf-life categories (`bakery` and `produce`), reducing error by over 30% compared to the naive baseline.
 2. **Meta Prophet** excelled on categories with smoother, multi-seasonal purchase cadences (`packaged`, `beverages`, and `meat`), delivering sub-10% MAPE on packaged goods.
-3. Both machine learning architectures significantly outperformed the Naive Seasonal persistence benchmark across all tested categories.
+3. The **per-category best model** (Prophet or LSTM, selected automatically by RMSE) outperforms the Naive Seasonal baseline on every category. Prophet alone does not universally beat the naive baseline — it scores higher MAPE/RMSE than naive on `bakery` (Prophet MAPE 32.85% vs naive 20.31%) and `produce` (Prophet MAPE 24.41% vs naive 14.22%), which is why LSTM is selected as the best model for those categories.
 4. Evaluation comparison plots for each category were generated and saved to `reports/forecast_comparison_<category>.png`.
 
 ---
