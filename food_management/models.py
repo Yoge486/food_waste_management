@@ -203,3 +203,33 @@ class POSIdempotencyKey(models.Model):
 
     def __str__(self):
         return f'{self.key[:20]}…'
+
+
+class ExpiryAlert(models.Model):
+    """
+    Deduplication log for expiry alerts (M1 Req 2.3).
+    One row per (item, threshold_days, alert_date) means the alert for that
+    item at that threshold was already sent today — skip on next run.
+    """
+    THRESHOLD_CHOICES = [
+        (1,  '1 day'),
+        (3,  '3 days'),
+        (7,  '7 days'),
+        (14, '14 days'),
+        (30, '30 days'),
+    ]
+
+    item = models.ForeignKey(
+        InventoryItem,
+        on_delete=models.CASCADE,
+        related_name='expiry_alerts',
+    )
+    threshold_days = models.IntegerField(choices=THRESHOLD_CHOICES)
+    alert_date = models.DateField()           # the calendar day this alert was sent
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [('item', 'threshold_days', 'alert_date')]
+
+    def __str__(self):
+        return f'Alert: {self.item.name} @ {self.threshold_days}d — {self.alert_date}'

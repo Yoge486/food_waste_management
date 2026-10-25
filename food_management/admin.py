@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import DonationRequest, InventoryItem, POSApiKey, POSIdempotencyKey, SurplusListing, Transaction
+from .models import DonationRequest, ExpiryAlert, InventoryItem, POSApiKey, POSIdempotencyKey, SurplusListing, Transaction
 
 
 @admin.register(InventoryItem)
@@ -46,3 +46,12 @@ class POSIdempotencyKeyAdmin(admin.ModelAdmin):
     list_display = ('key', 'api_key', 'created_at')
     search_fields = ('key',)
     readonly_fields = ('key', 'api_key', 'response_body', 'created_at')
+
+
+@admin.register(ExpiryAlert)
+class ExpiryAlertAdmin(admin.ModelAdmin):
+    list_display = ('item', 'threshold_days', 'alert_date', 'sent_at')
+    list_filter = ('threshold_days', 'alert_date')
+    search_fields = ('item__name', 'item__category')
+    date_hierarchy = 'alert_date'
+    readonly_fields = ('sent_at',)
