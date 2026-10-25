@@ -35,6 +35,7 @@ from api.schemas import (
     ReorderRecommendResponse,
     RiskScoreRequest,
     RiskScoreResponse,
+    WeeklyForecastItem,
 )
 from api.scheduler import (
     run_batch_waste_risk_assessment,
@@ -170,6 +171,51 @@ async def health_check():
 
 
 # -----------------------------------------------------------------------------
+# Helper: build weekly summary from daily forecast items
+# -----------------------------------------------------------------------------
+
+def _build_weekly_summary(
+    forecast_items: List[DailyForecastItem],
+) -> List[WeeklyForecastItem]:
+    """
+    Groups daily forecast items into ISO calendar weeks.
+    Each week starts on Monday.  Partial weeks at the end of the horizon
+    are included with however many days they contain.
+    """
+    from collections import defaultdict
+    from datetime import datetime as _dt
+
+    weeks: dict = defaultdict(lambda: {"total": 0.0, "days": 0, "start": None})
+
+    for item in forecast_items:
+        d = _dt.strptime(item.date, "%Y-%m-%d").date()
+        # ISO week Monday
+        monday = d - timedelta(days=d.weekday())
+        key = monday.isoformat()
+        weeks[key]["total"] += item.predicted_demand
+        weeks[key]["days"] += 1
+        if weeks[key]["start"] is None:
+            weeks[key]["start"] = monday
+
+    result = []
+    for i, (key, val) in enumerate(sorted(weeks.items())):
+        monday = val["start"]
+        sunday = monday + timedelta(days=6)
+        label = f"Week {i + 1} ({monday.strftime('%b %d')} – {sunday.strftime('%b %d')})"
+        total = round(val["total"], 2)
+        avg = round(total / val["days"], 2) if val["days"] else 0.0
+        result.append(WeeklyForecastItem(
+            week_start=key,
+            week_label=label,
+            total_demand=total,
+            avg_daily_demand=avg,
+            days=val["days"],
+        ))
+
+    return result
+
+
+# -----------------------------------------------------------------------------
 # 2. Demand Prediction Endpoint
 # -----------------------------------------------------------------------------
 @app.post(
@@ -269,6 +315,7 @@ async def predict_demand(req: DemandPredictRequest):
         unit=unit,
         horizon_days=horizon,
         forecast=forecast_items,
+        weekly_summary=_build_weekly_summary(forecast_items),
         total_projected_demand=total_demand,
     )
 

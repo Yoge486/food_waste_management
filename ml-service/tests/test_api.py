@@ -49,6 +49,13 @@ def test_predict_demand_endpoint():
     assert data["horizon_days"] == 7
     assert len(data["forecast"]) == 7
     assert data["total_projected_demand"] > 0
+    # Weekly summary: 7 days = 1 full week (or 2 partial weeks depending on today)
+    assert "weekly_summary" in data
+    assert len(data["weekly_summary"]) >= 1
+    week = data["weekly_summary"][0]
+    assert "week_start" in week
+    assert "total_demand" in week
+    assert week["days"] >= 1
 
 
 def test_risk_score_endpoint():

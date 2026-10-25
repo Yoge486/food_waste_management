@@ -23,12 +23,21 @@ class DailyForecastItem(BaseModel):
     upper_bound: Optional[float] = None
 
 
+class WeeklyForecastItem(BaseModel):
+    week_start: str          # ISO date of Monday that starts the week
+    week_label: str          # e.g. "Week 1 (Oct 27 – Nov 2)"
+    total_demand: float
+    avg_daily_demand: float
+    days: int                # number of forecast days in this week
+
+
 class DemandPredictResponse(BaseModel):
     category: str
     model_used: str
     unit: str
     horizon_days: int
     forecast: List[DailyForecastItem]
+    weekly_summary: List[WeeklyForecastItem]   # aggregated weekly view
     total_projected_demand: float
 
 
