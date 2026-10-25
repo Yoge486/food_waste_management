@@ -24,33 +24,48 @@
     </div>
 </div>
 
-<!-- Authentic Microcopy Urgent Banner -->
+<!-- Current expiry alert -->
 <div class="urgent-microcopy-banner">
     <div class="p-2 bg-white rounded-1 border border-warning text-danger d-flex align-items-center justify-content-center" style="width: 38px; height: 38px;">
         <i class="bi bi-exclamation-triangle-fill fs-5"></i>
     </div>
     <div class="flex-grow-1">
-        <div class="microcopy-text">3 kg biryani expires in 4 hrs. 2 NGOs nearby.</div>
-        <div class="small text-muted">Immediate action required: Convert to surplus lot for 1-click NGO reservation before shelf-life closes.</div>
+        {% for alert_item in expiry_alerts %}
+            <div class="microcopy-text">{{ alert_item.name }} ({{ alert_item.quantity }} {{ alert_item.unit }}) expires {{ alert_item.expiry_date|date:"M j" }}.</div>
+            <div class="small text-muted">Review its expiry and decide whether it can be safely redistributed.</div>
+        {% empty %}
+            <div class="microcopy-text">No batches expire within the next three days.</div>
+            <div class="small text-muted">Inventory expiry alerts will appear here when action is needed.</div>
+        {% endfor %}
     </div>
-    <a href="{% url 'surplus_create' %}" class="btn btn-brand-urgent btn-sm px-3 py-1 text-nowrap">
-        <i class="bi bi-lightning-charge-fill me-1"></i> Post Surplus
-    </a>
+    {% if expiry_alerts %}
+        <a href="{% url 'surplus_create' %}" class="btn btn-brand-urgent btn-sm px-3 py-1 text-nowrap">
+            <i class="bi bi-lightning-charge-fill me-1"></i> Review Surplus
+        </a>
+    {% endif %}
 </div>
 
 <!-- Compact Filter Bar -->
 <div class="card p-3 mb-3 card-sm-radius">
     <form method="get" class="row g-2 align-items-center">
-        <div class="col-md-5">
+        <div class="col-md-5 col-lg-4">
             <div class="input-group input-group-sm">
                 <span class="input-group-text bg-white border-end-0 text-muted"><i class="bi bi-search"></i></span>
-                <input type="text" name="q" value="{{ query }}" class="form-control border-start-0" placeholder="Filter by item name (e.g. Biryani, Rice, Milk, Paneer)...">
+                <input type="search" name="q" value="{{ query }}" class="form-control border-start-0" placeholder="Search name, category, storage, notes">
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3 col-lg-2">
+            <select name="category" class="form-select form-select-sm" aria-label="Filter by category">
+                <option value="">All categories</option>
+                {% for category_option in categories %}
+                    <option value="{{ category_option }}" {% if category == category_option %}selected{% endif %}>{{ category_option }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-4 col-lg-2">
             <div class="input-group input-group-sm">
                 <span class="input-group-text bg-white border-end-0 text-muted"><i class="bi bi-hourglass-split"></i></span>
-                <select name="risk" class="form-select border-start-0">
+                <select name="risk" class="form-select border-start-0" aria-label="Filter by risk level">
                     <option value="">All Expiry Risk Levels</option>
                     <option value="critical" {% if risk == 'critical' %}selected{% endif %}>🔴 Critical (&le; 24h - 3 days)</option>
                     <option value="high" {% if risk == 'high' %}selected{% endif %}>🟠 High (&le; 7 days)</option>
@@ -59,12 +74,34 @@
                 </select>
             </div>
         </div>
-        <div class="col-md-3 d-flex gap-2">
-            <button type="submit" class="btn btn-brand-primary btn-sm w-100 py-1.5">
-                <i class="bi bi-funnel me-1"></i> Apply Filter
+        <div class="col-md-3 col-lg-2">
+            <select name="expiry" class="form-select form-select-sm" aria-label="Filter by expiry date">
+                <option value="">Any expiry date</option>
+                <option value="expired" {% if expiry == 'expired' %}selected{% endif %}>Already expired</option>
+                <option value="3" {% if expiry == '3' %}selected{% endif %}>Within 3 days</option>
+                <option value="7" {% if expiry == '7' %}selected{% endif %}>Within 7 days</option>
+                <option value="30" {% if expiry == '30' %}selected{% endif %}>Within 30 days</option>
+            </select>
+        </div>
+        <div class="col-md-4 col-lg-3">
+            <input type="search" name="location" value="{{ location }}" class="form-control form-control-sm" placeholder="Storage location" aria-label="Filter by storage location">
+        </div>
+        <div class="col-md-3 col-lg-2">
+            <select name="sort" class="form-select form-select-sm" aria-label="Sort inventory">
+                <option value="expiry" {% if sort == 'expiry' %}selected{% endif %}>Expiry: soonest</option>
+                <option value="-expiry" {% if sort == '-expiry' %}selected{% endif %}>Expiry: latest</option>
+                <option value="name" {% if sort == 'name' %}selected{% endif %}>Name: A–Z</option>
+                <option value="-name" {% if sort == '-name' %}selected{% endif %}>Name: Z–A</option>
+                <option value="quantity" {% if sort == 'quantity' %}selected{% endif %}>Quantity: low-high</option>
+                <option value="-quantity" {% if sort == '-quantity' %}selected{% endif %}>Quantity: high-low</option>
+            </select>
+        </div>
+        <div class="col-md-5 col-lg-3 d-flex gap-2">
+            <button type="submit" class="btn btn-brand-primary btn-sm flex-grow-1 py-1.5">
+                <i class="bi bi-funnel me-1"></i> Apply filters
             </button>
-            {% if query or risk %}
-                <a href="{% url 'inventory_list' %}" class="btn btn-outline-secondary btn-sm px-2.5 py-1.5" title="Reset Filters">
+            {% if query or risk or category or location or expiry or sort != 'expiry' %}
+                <a href="{% url 'inventory_list' %}" class="btn btn-outline-secondary btn-sm px-2.5 py-1.5" title="Reset filters">
                     <i class="bi bi-x-lg"></i>
                 </a>
             {% endif %}
@@ -74,6 +111,10 @@
 
 <!-- Compact Inventory Table (Sorted by Urgency) -->
 <div class="card p-0 overflow-hidden shadow-sm" style="border-radius: var(--radius-lg);">
+    <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom small text-muted">
+        <span>{{ page_obj.paginator.count }} item{{ page_obj.paginator.count|pluralize }} found</span>
+        <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages|default:1 }}</span>
+    </div>
     <div class="table-responsive">
         <table class="table table-compact-food align-middle">
             <thead>
@@ -220,4 +261,26 @@
         </table>
     </div>
 </div>
+
+{% if page_obj.has_other_pages %}
+    <nav class="mt-3" aria-label="Inventory pages">
+        <ul class="pagination pagination-sm justify-content-center flex-wrap">
+            {% if page_obj.has_previous %}
+                <li class="page-item">
+                    <a class="page-link" href="?q={{ query|urlencode }}&category={{ category|urlencode }}&risk={{ risk|urlencode }}&location={{ location|urlencode }}&expiry={{ expiry|urlencode }}&sort={{ sort|urlencode }}&page={{ page_obj.previous_page_number }}">Previous</a>
+                </li>
+            {% else %}
+                <li class="page-item disabled"><span class="page-link">Previous</span></li>
+            {% endif %}
+            <li class="page-item disabled"><span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span></li>
+            {% if page_obj.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="?q={{ query|urlencode }}&category={{ category|urlencode }}&risk={{ risk|urlencode }}&location={{ location|urlencode }}&expiry={{ expiry|urlencode }}&sort={{ sort|urlencode }}&page={{ page_obj.next_page_number }}">Next</a>
+                </li>
+            {% else %}
+                <li class="page-item disabled"><span class="page-link">Next</span></li>
+            {% endif %}
+        </ul>
+    </nav>
+{% endif %}
 {% endblock %}

@@ -3,16 +3,14 @@
 {% block title %}Food Waste Operations & AI Forecasting{% endblock %}
 
 {% block content %}
-<!-- Page Header & Urgency Indicator -->
+<!-- Operations overview -->
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
     <div>
         <div class="d-flex align-items-center gap-2 mb-1">
-            <span class="expiry-chip expiry-chip--urgent">
-                <span class="pulse-indicator pulse-indicator--urgent"></span> TIME SENSITIVE DISPATCH
-            </span>
-            <span class="text-muted small">· Real-time Expiry Telemetry & AI Rescue Engine</span>
+            <span class="badge bg-success-subtle text-success">Inventory overview</span>
+            <span class="text-muted small">Counts refresh automatically every minute.</span>
         </div>
-        <h2 class="h3 fw-bold mb-0">Food Waste Operations Dashboard</h2>
+        <h2 class="h3 fw-bold mb-0">Food recovery dashboard</h2>
     </div>
 
     <!-- Quick Action Shortcut Buttons (Radius scale: 4 / 8) -->
@@ -30,21 +28,20 @@
 </div>
 
 <!-- ==========================================
-     HERO METRICS (kg saved, meals served, CO2 avoided)
+     CURRENT OPERATIONAL METRICS
      ========================================== -->
 <div class="row g-3 mb-4">
     <div class="col-6 col-lg-3">
         <div class="hero-metric-card h-100">
             <div class="d-flex justify-content-between align-items-center mb-1">
-                <div class="metric-label">Food Saved</div>
+                <div class="metric-label">Recovered quantity</div>
                 <i class="bi bi-basket-fill text-muted"></i>
             </div>
             <div class="metric-val text-success">
-                {% if recovered_quantity > 0 %}{{ recovered_quantity }}<span class="fs-6 fw-normal text-muted ms-1">kg</span>{% else %}1,420<span class="fs-6 fw-normal text-muted ms-1">kg</span>{% endif %}
+                <span data-metric="recovered_quantity">{{ recovered_quantity|floatformat:2 }}</span>
             </div>
             <div class="small text-muted mt-2 d-flex align-items-center gap-1">
-                <span class="text-success fw-semibold"><i class="bi bi-arrow-up-right"></i> +18%</span>
-                <span>vs last month</span>
+                <span>Recorded quantity across collected donations</span>
             </div>
         </div>
     </div>
@@ -52,15 +49,14 @@
     <div class="col-6 col-lg-3">
         <div class="hero-metric-card h-100">
             <div class="d-flex justify-content-between align-items-center mb-1">
-                <div class="metric-label">Meals Served</div>
+                <div class="metric-label">Active surplus listings</div>
                 <i class="bi bi-heart-fill text-danger"></i>
             </div>
             <div class="metric-val" style="color: var(--primary-green);">
-                {% if collected_donations > 0 %}{{ collected_donations|add:3550 }}{% else %}3,550{% endif %}
+                <span data-metric="active_surplus">{{ active_surplus }}</span>
             </div>
             <div class="small text-muted mt-2 d-flex align-items-center gap-1">
-                <span class="badge bg-warning-subtle text-dark px-1.5 py-0.5" style="font-size: 0.72rem;">2.5 meals/kg</span>
-                <span>redirected</span>
+                <span>Available for redistribution</span>
             </div>
         </div>
     </div>
@@ -68,15 +64,14 @@
     <div class="col-6 col-lg-3">
         <div class="hero-metric-card h-100">
             <div class="d-flex justify-content-between align-items-center mb-1">
-                <div class="metric-label">CO₂ Avoided</div>
-                <i class="bi bi-cloud-slash text-success"></i>
+                <div class="metric-label">Open donation requests</div>
+                <i class="bi bi-heart-fill text-danger"></i>
             </div>
-            <div class="metric-val" style="color: #2E7D32;">
-                3.55<span class="fs-6 fw-normal text-muted ms-1">t</span>
+            <div class="metric-val text-primary">
+                <span data-metric="donation_requests">{{ donation_requests }}</span>
             </div>
             <div class="small text-muted mt-2 d-flex align-items-center gap-1">
-                <i class="bi bi-shield-check text-success"></i>
-                <span>Greenhouse prevented</span>
+                <span>Requests not yet collected</span>
             </div>
         </div>
     </div>
@@ -84,75 +79,48 @@
     <div class="col-6 col-lg-3">
         <div class="hero-metric-card h-100" style="border-left: 3px solid var(--accent-tomato);">
             <div class="d-flex justify-content-between align-items-center mb-1">
-                <div class="metric-label" style="color: var(--accent-tomato);">Urgent Watchlist</div>
+                <div class="metric-label" style="color: var(--accent-tomato);">Expiring within 3 days</div>
                 <span class="pulse-indicator pulse-indicator--urgent"></span>
             </div>
             <div class="metric-val text-danger">
-                {{ high_risk|default:"3" }}<span class="fs-6 fw-normal text-muted ms-1">batches</span>
+                <span data-metric="urgent_inventory">{{ urgent_inventory }}</span><span class="fs-6 fw-normal text-muted ms-1">batches</span>
             </div>
             <div class="small text-danger mt-2 fw-medium">
-                <i class="bi bi-clock-history me-1"></i> < 24h to landfill risk
+                <i class="bi bi-clock-history me-1"></i> Check expiry dates and safe handling
             </div>
         </div>
     </div>
 </div>
 
-<!-- ==========================================
-     AI WASTE PREDICTION MODULE & FORECAST CHART
-     ========================================== -->
 <div class="card p-4 mb-4" style="border-radius: var(--radius-lg); background: var(--surface-card); border-top: 4px solid var(--primary-green);">
-    <div class="row g-4 align-items-center">
-        <!-- Big Headline Number & AI Context -->
-        <div class="col-lg-5 border-end-lg pe-lg-4">
-            <div class="d-flex align-items-center gap-2 mb-2">
-                <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-0.5 rounded-1 small fw-bold">
-                    <i class="bi bi-cpu-fill me-1"></i> AI PREDICTION
-                </span>
-                <span class="text-muted small">Confidence Band: 89%</span>
+    <div class="row g-4">
+        <div class="col-lg-5">
+            <span class="badge bg-warning-subtle text-dark mb-2">Rule-based estimate · not a trained ML prediction</span>
+            <h3 class="h5 fw-bold">Waste-risk overview</h3>
+            <div class="d-flex align-items-baseline gap-2">
+                <span class="headline-prediction">{{ prediction.avg_risk }}%</span>
+                <span class="text-muted">average heuristic risk score</span>
             </div>
-
-            <div class="headline-prediction my-2">
-                ~42 kg
-            </div>
-            <h4 class="h5 fw-bold text-dark mb-2">May expire this week across inventory</h4>
-            <p class="text-muted small mb-3">
-                Calculated by heuristic decay velocity, ambient kitchen temperature & historical 7-day pickup latency.
-            </p>
-
-            <div class="p-3 rounded-2 mb-3" style="background: var(--bg-cream); border: 1px dashed var(--border-warm);">
-                <div class="d-flex align-items-center gap-2 mb-1">
-                    <i class="bi bi-lightning-charge-fill text-warning"></i>
-                    <strong class="small text-dark">Suggested AI Mitigation:</strong>
-                </div>
-                <div class="small text-secondary">
-                    "Post 25 kg cooked rice & 14 kg paneer gravy to Surplus Marketplace now. 2 verified NGOs are within 2.5 km."
-                </div>
-            </div>
-
-            <div class="d-flex gap-2">
-                <a href="{% url 'surplus_create' %}" class="btn btn-brand-urgent btn-sm px-3.5 py-2">
-                    <i class="bi bi-send-check me-1"></i> Fast-Track Surplus Post
-                </a>
-                <a href="{% url 'inventory_list' %}" class="btn btn-outline-secondary btn-sm px-3 py-2" style="border-radius: var(--radius-md);">
-                    Review Inventory
-                </a>
-            </div>
+            <p class="small text-muted mb-3">{{ prediction.recommended_action }}</p>
+            <a href="{% url 'inventory_list' %}" class="btn btn-outline-secondary btn-sm">Review inventory</a>
         </div>
-
-        <!-- Forecast vs Actual Chart with Confidence Band -->
-        <div class="col-lg-7 ps-lg-4">
-            <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-                <div>
-                    <h5 class="fw-bold mb-0" style="font-size: 1.05rem;">AI Waste Forecast vs Actual Redirection</h5>
-                    <span class="text-muted" style="font-size: 0.78rem;">Projected waste risks (kg) vs real-time rescued volume with shaded 90% confidence corridor</span>
-                </div>
-                <div class="d-flex align-items-center gap-2">
-                    <span class="badge bg-light text-dark border px-2 py-1" style="font-size: 0.72rem;">Oct 2026 Live Model</span>
-                </div>
-            </div>
-            
-            <div style="height: 250px; position: relative;">
-                <canvas id="aiForecastChart"></canvas>
+        <div class="col-lg-7">
+            <h3 class="h5 fw-bold">Expiry alerts</h3>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead><tr><th>Item</th><th>Quantity</th><th>Expiry</th></tr></thead>
+                    <tbody>
+                        {% for item in expiry_alerts %}
+                            <tr>
+                                <td>{{ item.name }}</td>
+                                <td>{{ item.quantity }} {{ item.unit }}</td>
+                                <td>{{ item.expiry_date|date:"M j, Y" }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="3" class="text-muted">No items expire within seven days.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>

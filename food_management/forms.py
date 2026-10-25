@@ -148,3 +148,11 @@ class UserProfileForm(forms.ModelForm):
 
 class CSVImportForm(forms.Form):
     csv_file = forms.FileField(label='CSV file', help_text='Expected columns: name, category, quantity, unit, purchase_date, expiry_date, storage_location, notes')
+
+    def clean_csv_file(self):
+        csv_file = self.cleaned_data['csv_file']
+        if not csv_file.name.lower().endswith('.csv'):
+            raise forms.ValidationError('Upload a .csv file.')
+        if csv_file.size > 5 * 1024 * 1024:
+            raise forms.ValidationError('CSV files must be 5 MB or smaller.')
+        return csv_file

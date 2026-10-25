@@ -8,8 +8,12 @@ from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import User
+from django.core.paginator import Paginator
 from django.db.models import Q, Sum
+from django.db.models.functions import TruncMonth
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
 from core.models import UserProfile
 
@@ -30,10 +34,12 @@ def dashboard(request):
     if request.user.is_authenticated:
         get_or_create_user_profile(request.user)
 
+    today = timezone.localdate()
     inventory = InventoryItem.objects.all().order_by('-created_at')
     recent_inventory = inventory[:5]
     total_inventory = inventory.count()
-    near_expiry = inventory.filter(expiry_date__lte=date.today() + timedelta(days=7)).count()
+    near_expiry = inventory.filter(expiry_date__lte=today + timedelta(days=7)).count()
+    urgent_inventory = inventory.filter(expiry_date__lte=today + timedelta(days=3)).count()
     high_risk = inventory.filter(risk_level__in=['high', 'critical']).count()
     active_surplus = SurplusListing.objects.filter(status='available').count()
     donation_requests = DonationRequest.objects.count()
@@ -42,21 +48,75 @@ def dashboard(request):
     prediction = estimate_waste_risk(inventory)
     gamification = get_gamification_summary(request.user)
     leaderboard = get_leaderboard(limit=5)
+    expiry_alerts = inventory.filter(
+        expiry_date__lte=today + timedelta(days=7),
+    ).order_by('expiry_date', 'name')[:5]
+
+    first_month = (today.replace(day=1) - timedelta(days=150)).replace(day=1)
+    monthly_recovery = {
+        entry['month'].date(): float(entry['total'] or 0)
+        for entry in DonationRequest.objects.filter(
+            status='collected',
+            created_at__date__gte=first_month,
+        ).annotate(month=TruncMonth('created_at')).values('month').annotate(
+            total=Sum('requested_quantity'),
+        )
+    }
+    recovery_months = []
+    for offset in range(5, -1, -1):
+        month = today.replace(day=1)
+        for _ in range(offset):
+            month = (month - timedelta(days=1)).replace(day=1)
+        recovery_months.append(month)
+    recovery_chart = {
+        'labels': [month.strftime('%b %Y') for month in recovery_months],
+        'data': [monthly_recovery.get(month, 0) for month in recovery_months],
+    }
+    expiry_chart = {
+        'safe': inventory.filter(expiry_date__gt=today + timedelta(days=7)).count(),
+        'watch': inventory.filter(
+            expiry_date__gt=today + timedelta(days=3),
+            expiry_date__lte=today + timedelta(days=7),
+        ).count(),
+        'urgent': urgent_inventory,
+    }
 
     context = {
         'total_inventory': total_inventory,
         'near_expiry': near_expiry,
+        'urgent_inventory': urgent_inventory,
         'high_risk': high_risk,
         'active_surplus': active_surplus,
         'donation_requests': donation_requests,
         'collected_donations': collected_donations,
         'recovered_quantity': recovered_quantity,
         'recent_inventory': recent_inventory,
+        'expiry_alerts': expiry_alerts,
+        'recovery_chart': recovery_chart,
+        'expiry_chart': expiry_chart,
         'prediction': prediction,
         'gamification': gamification,
         'leaderboard': leaderboard,
     }
     return render(request, 'food_management/dashboard.html', context)
+
+
+def dashboard_metrics(request):
+    today = timezone.localdate()
+    inventory = InventoryItem.objects.all()
+    recovered_quantity = DonationRequest.objects.filter(status='collected').aggregate(
+        total=Sum('requested_quantity'),
+    )['total'] or 0
+    response = JsonResponse({
+        'total_inventory': inventory.count(),
+        'near_expiry': inventory.filter(expiry_date__lte=today + timedelta(days=7)).count(),
+        'urgent_inventory': inventory.filter(expiry_date__lte=today + timedelta(days=3)).count(),
+        'active_surplus': SurplusListing.objects.filter(status='available').count(),
+        'donation_requests': DonationRequest.objects.exclude(status='collected').count(),
+        'recovered_quantity': float(recovered_quantity),
+    })
+    response['Cache-Control'] = 'no-store'
+    return response
 
 
 @role_required('admin')
@@ -155,23 +215,68 @@ def admin_user_delete(request, user_id):
 
 
 def inventory_list(request):
-    items = InventoryItem.objects.all().order_by('expiry_date')
+    items = InventoryItem.objects.all()
     query = request.GET.get('q', '').strip()
     risk = request.GET.get('risk', '').strip()
+    category = request.GET.get('category', '').strip()
+    location = request.GET.get('location', '').strip()
+    expiry = request.GET.get('expiry', '').strip()
+    sort = request.GET.get('sort', 'expiry')
+    today = timezone.localdate()
 
     if query:
         items = items.filter(
             Q(name__icontains=query)
             | Q(category__icontains=query)
             | Q(storage_location__icontains=query)
+            | Q(notes__icontains=query)
         )
-    if risk:
+    if risk in dict(InventoryItem.RISK_CHOICES):
         items = items.filter(risk_level=risk)
+    if category:
+        items = items.filter(category__iexact=category)
+    if location:
+        items = items.filter(storage_location__icontains=location)
+    if expiry == 'expired':
+        items = items.filter(expiry_date__lt=today)
+    elif expiry in {'3', '7', '30'}:
+        items = items.filter(expiry_date__gte=today, expiry_date__lte=today + timedelta(days=int(expiry)))
+
+    ordering = {
+        'expiry': ('expiry_date', 'name'),
+        '-expiry': ('-expiry_date', 'name'),
+        'name': ('name', 'expiry_date'),
+        '-name': ('-name', 'expiry_date'),
+        'quantity': ('quantity', 'name'),
+        '-quantity': ('-quantity', 'name'),
+    }
+    if sort not in ordering:
+        sort = 'expiry'
+    items = items.order_by(*ordering[sort])
+
+    paginator = Paginator(items, 25)
+    page_obj = paginator.get_page(request.GET.get('page'))
+    expiry_alerts = InventoryItem.objects.filter(
+        expiry_date__lte=today + timedelta(days=3),
+    ).order_by('expiry_date', 'name')[:1]
 
     return render(
         request,
         'food_management/inventory_list.html',
-        {'items': items, 'query': query, 'risk': risk},
+        {
+            'items': page_obj.object_list,
+            'page_obj': page_obj,
+            'query': query,
+            'risk': risk,
+            'category': category,
+            'categories': InventoryItem.objects.order_by('category').values_list(
+                'category', flat=True,
+            ).distinct(),
+            'location': location,
+            'expiry': expiry,
+            'sort': sort,
+            'expiry_alerts': expiry_alerts,
+        },
     )
 
 
@@ -224,38 +329,89 @@ def inventory_import(request):
         form = CSVImportForm(request.POST, request.FILES)
         if form.is_valid():
             file = request.FILES['csv_file']
-            text = file.read().decode('utf-8-sig')
-            reader = csv.DictReader(StringIO(text))
-            created = 0
-            for row in reader:
-                if not row or not row.get('name'):
+            try:
+                text = file.read().decode('utf-8-sig')
+                reader = csv.DictReader(StringIO(text), strict=True)
+                rows = list(reader)
+            except (UnicodeDecodeError, csv.Error) as error:
+                form.add_error('csv_file', f'Unable to read this CSV file: {error}')
+                return render(request, 'food_management/inventory_import.html', {'form': form})
+
+            headers = {header.strip().lower() for header in (reader.fieldnames or []) if header}
+            required_headers = {'name', 'category', 'quantity', 'purchase_date', 'expiry_date'}
+            missing_headers = required_headers - headers
+            if missing_headers:
+                form.add_error(
+                    'csv_file',
+                    'Missing required column(s): ' + ', '.join(sorted(missing_headers)),
+                )
+                return render(request, 'food_management/inventory_import.html', {'form': form})
+
+            imported_items = []
+            rejected_rows = []
+            today = timezone.localdate()
+            for row in rows:
+                line_number = reader.line_num
+                if None in row:
+                    rejected_rows.append(f'Row {line_number}: too many columns.')
                     continue
+                values = {
+                    str(key).strip().lower(): (value or '').strip()
+                    for key, value in row.items()
+                    if key is not None
+                }
+                name = values.get('name', '')
+                category_value = values.get('category', '')
                 try:
-                    quantity = Decimal(row.get('quantity', 0))
+                    quantity = Decimal(values.get('quantity', ''))
+                    purchase_date = date.fromisoformat(values.get('purchase_date', ''))
+                    expiry_date_value = date.fromisoformat(values.get('expiry_date', ''))
                 except (InvalidOperation, TypeError, ValueError):
+                    rejected_rows.append(f'Row {line_number}: invalid quantity or date.')
+                    continue
+                if (
+                    not name
+                    or not category_value
+                    or len(name) > 150
+                    or len(category_value) > 100
+                    or not quantity.is_finite()
+                    or quantity <= 0
+                    or quantity >= Decimal('100000000')
+                    or max(0, -quantity.as_tuple().exponent) > 2
+                    or expiry_date_value < purchase_date
+                ):
+                    rejected_rows.append(f'Row {line_number}: invalid name, category, quantity, or date range.')
                     continue
 
-                purchase_value = row.get('purchase_date')
-                expiry_value = row.get('expiry_date')
-                try:
-                    purchase_date = date.fromisoformat(purchase_value) if purchase_value else date.today()
-                    expiry_date_value = date.fromisoformat(expiry_value) if expiry_value else date.today()
-                except ValueError:
-                    continue
-
-                InventoryItem.objects.create(
-                    name=row.get('name', '').strip(),
-                    category=row.get('category', 'Uncategorized').strip() or 'Uncategorized',
+                days_until_expiry = (expiry_date_value - today).days
+                risk_level = (
+                    'critical' if days_until_expiry <= 3
+                    else 'high' if days_until_expiry <= 7
+                    else 'medium' if days_until_expiry <= 30
+                    else 'low'
+                )
+                imported_items.append(InventoryItem(
+                    name=name,
+                    category=category_value,
                     quantity=quantity,
-                    unit=row.get('unit', 'kg').strip() or 'kg',
+                    unit=values.get('unit') or 'kg',
                     purchase_date=purchase_date,
                     expiry_date=expiry_date_value,
-                    storage_location=row.get('storage_location', 'Main storage').strip() or 'Main storage',
-                    notes=row.get('notes', ''),
-                )
-                created += 1
+                    storage_location=values.get('storage_location') or 'Main storage',
+                    risk_level=risk_level,
+                    notes=values.get('notes', ''),
+                ))
 
-            messages.success(request, f'Imported {created} inventory item(s).')
+            InventoryItem.objects.bulk_create(imported_items)
+            if imported_items:
+                messages.success(request, f'Imported {len(imported_items)} inventory item(s).')
+            if rejected_rows:
+                details = ' '.join(rejected_rows[:5])
+                if len(rejected_rows) > 5:
+                    details += f' And {len(rejected_rows) - 5} more row(s) were rejected.'
+                messages.warning(request, f'Rejected {len(rejected_rows)} row(s): {details}')
+            if not imported_items and not rejected_rows:
+                messages.warning(request, 'The CSV did not contain any inventory rows.')
             return redirect('inventory_list')
     else:
         form = CSVImportForm()

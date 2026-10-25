@@ -5,6 +5,7 @@ from .views import (
     admin_user_toggle_status,
     admin_user_delete,
     dashboard,
+    dashboard_metrics,
     donation_request_create,
     donation_requests,
     donation_status_update,
@@ -24,6 +25,7 @@ from .views import (
 
 urlpatterns = [
     path('', dashboard, name='dashboard'),
+    path('dashboard/metrics/', dashboard_metrics, name='dashboard_metrics'),
     path('admin-panel/', admin_dashboard, name='admin_dashboard'),
     path('accounts/register/', register, name='register'),
     path('accounts/login/', login_view, name='login'),
