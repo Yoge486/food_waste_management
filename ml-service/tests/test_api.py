@@ -130,6 +130,29 @@ def test_reorder_recommend_endpoint():
     assert "reasoning" in data
 
 
+def test_reorder_recommend_auto_forecast():
+    """When forecast_lead_demand is omitted the endpoint derives it from the
+    trained model (or heuristic fallback).  Response must still be valid."""
+    payload = {
+        "category": "dairy",
+        "current_stock": 10.0,
+        "lead_time_days": 3,
+        "storage_capacity": 200.0,
+    }
+    response = client.post("/reorder/recommend", headers=AUTH_HEADERS, json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["category"] == "dairy"
+    assert data["recommended_order_qty"] >= 0.0
+    assert data["status"] in [
+        "ORDER_RECOMMENDED",
+        "SUFFICIENT_STOCK",
+        "CAPACITY_CONSTRAINED",
+        "SHELF_LIFE_CONSTRAINED",
+    ]
+    assert "reasoning" in data
+
+
 def test_models_metrics_endpoint():
     response = client.get("/models/metrics", headers=AUTH_HEADERS)
     assert response.status_code == 200

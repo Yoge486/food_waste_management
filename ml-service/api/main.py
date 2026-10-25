@@ -347,15 +347,50 @@ async def get_batch_risk(
 async def recommend_reorder_endpoint(req: ReorderRecommendRequest):
     """
     Calculates optimal replenishment quantity with transparent reasoning.
-    If forecast_lead_demand is omitted, queries the trained category model automatically.
+    If forecast_lead_demand is omitted, the endpoint queries the trained Prophet
+    or LSTM model (selected by metrics.json best_model) to estimate cumulative
+    demand over the supplier lead time.  Falls back to the category profile
+    base_demand heuristic only when the model file is missing.
     """
     cat = req.category.lower()
 
-    # If lead demand not provided, calculate from category forecast
+    # If lead demand not provided, derive it from the trained forecasting model
     lead_demand = req.forecast_lead_demand
     if lead_demand is None:
-        profile = CATEGORY_PROFILES.get(cat, {"base_demand": 45.0})
-        lead_demand = profile["base_demand"] * req.lead_time_days
+        horizon = req.lead_time_days
+        model_choice = _get_best_model_choice(cat)
+        forecast_sum: Optional[float] = None
+
+        if model_choice == "prophet":
+            model_file = settings.MODELS_DIR / f"prophet_{cat}.joblib"
+            if model_file.exists():
+                try:
+                    forecaster = ProphetForecaster.load(model_file)
+                    forecast_df = forecaster.predict(horizon=horizon)
+                    forecast_sum = float(forecast_df["yhat"].clip(lower=0.0).sum())
+                except Exception as exc:
+                    print(f"[reorder] Prophet inference failed for '{cat}': {exc}. Using heuristic.")
+        else:
+            model_file = settings.MODELS_DIR / f"lstm_{cat}.pt"
+            tx_file = settings.DATA_DIR / "daily_transactions.csv"
+            if model_file.exists() and tx_file.exists():
+                try:
+                    forecaster_lstm = LSTMForecaster.load(model_file)
+                    tx_df = pd.read_csv(tx_file)
+                    cat_df = tx_df[tx_df["category"].str.lower() == cat].sort_values("date")
+                    recent = cat_df["sales_qty"].values[-forecaster_lstm.lookback:]
+                    if len(recent) >= forecaster_lstm.lookback:
+                        preds = forecaster_lstm.predict(recent_history=recent, horizon=horizon)
+                        forecast_sum = float(np.clip(preds, 0.0, None).sum())
+                except Exception as exc:
+                    print(f"[reorder] LSTM inference failed for '{cat}': {exc}. Using heuristic.")
+
+        if forecast_sum is not None:
+            lead_demand = forecast_sum
+        else:
+            # Heuristic fallback: category base_demand scaled by lead time
+            profile = CATEGORY_PROFILES.get(cat, {"base_demand": 45.0})
+            lead_demand = profile["base_demand"] * req.lead_time_days
 
     rec = recommend_reorder(
         category=cat,
