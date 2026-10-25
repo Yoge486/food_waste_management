@@ -25,7 +25,10 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 ML_SERVICE_URL = os.getenv('ML_SERVICE_URL', 'http://127.0.0.1:8001')
-ML_SERVICE_API_KEY = os.getenv('ML_SERVICE_API_KEY', 'dev-secret-key-food-waste-2026')
+# No hardcoded default key — must be set in .env as ML_SERVICE_API_KEY.
+# Falls back to empty string so connection attempts fail fast rather than
+# authenticating with a known-public credential.
+ML_SERVICE_API_KEY = os.getenv('ML_SERVICE_API_KEY', '')
 REQUEST_TIMEOUT = float(os.getenv('ML_SERVICE_TIMEOUT', '4.0'))
 
 
