@@ -35,7 +35,11 @@ def dashboard(request):
         get_or_create_user_profile(request.user)
 
     today = timezone.localdate()
-    inventory = InventoryItem.objects.all().order_by('-created_at')
+    # Scope inventory to the logged-in user; admins see all records
+    if request.user.is_authenticated and not request.user.is_superuser:
+        inventory = InventoryItem.objects.filter(business=request.user).order_by('-created_at')
+    else:
+        inventory = InventoryItem.objects.all().order_by('-created_at')
     recent_inventory = inventory[:5]
     total_inventory = inventory.count()
     near_expiry = inventory.filter(expiry_date__lte=today + timedelta(days=7)).count()
@@ -215,7 +219,11 @@ def admin_user_delete(request, user_id):
 
 
 def inventory_list(request):
-    items = InventoryItem.objects.all()
+    # Scope to the logged-in user; admins see all
+    if request.user.is_authenticated and not request.user.is_superuser:
+        items = InventoryItem.objects.filter(business=request.user)
+    else:
+        items = InventoryItem.objects.all()
     query = request.GET.get('q', '').strip()
     risk = request.GET.get('risk', '').strip()
     category = request.GET.get('category', '').strip()
@@ -285,7 +293,9 @@ def inventory_create(request):
     if request.method == 'POST':
         form = InventoryForm(request.POST)
         if form.is_valid():
-            form.save()
+            item = form.save(commit=False)
+            item.business = request.user  # assign tenant owner
+            item.save()
             profile, _ = UserProfile.objects.get_or_create(user=request.user)
             profile.points += 10
             profile.level = max(1, profile.points // 100 + 1)
@@ -391,6 +401,7 @@ def inventory_import(request):
                     else 'low'
                 )
                 imported_items.append(InventoryItem(
+                    business=request.user,  # tenant owner
                     name=name,
                     category=category_value,
                     quantity=quantity,
@@ -428,7 +439,9 @@ def surplus_listing_create(request):
     if request.method == 'POST':
         form = SurplusListingForm(request.POST)
         if form.is_valid():
-            form.save()
+            listing = form.save(commit=False)
+            listing.business = request.user  # assign tenant owner
+            listing.save()
             profile, _ = UserProfile.objects.get_or_create(user=request.user)
             profile.points += 20
             profile.level = max(1, profile.points // 100 + 1)

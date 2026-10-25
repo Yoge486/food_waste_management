@@ -1,5 +1,6 @@
 from datetime import date
 
+from django.conf import settings
 from django.db import models
 
 
@@ -10,6 +11,17 @@ class InventoryItem(models.Model):
         ('high', 'High'),
         ('critical', 'Critical'),
     ]
+
+    # Tenant owner – nullable so existing rows are not broken.
+    # New items should always have an owner assigned by the view.
+    business = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='inventory_items',
+        help_text='The business/user account that owns this inventory record.',
+    )
 
     name = models.CharField(max_length=150)
     category = models.CharField(max_length=100)
@@ -22,6 +34,13 @@ class InventoryItem(models.Model):
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['expiry_date', 'name']
+        indexes = [
+            models.Index(fields=['business', 'expiry_date']),
+            models.Index(fields=['business', 'category']),
+        ]
 
     def __str__(self):
         return f'{self.name} ({self.quantity} {self.unit})'
@@ -62,6 +81,15 @@ class SurplusListing(models.Model):
         ('cancelled', 'Cancelled'),
     ]
 
+    # Tenant owner
+    business = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='surplus_listings',
+    )
+
     food_name = models.CharField(max_length=150)
     category = models.CharField(max_length=100)
     quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -95,3 +123,48 @@ class DonationRequest(models.Model):
 
     def __str__(self):
         return f'{self.ngo_name} - {self.listing.food_name}'
+
+
+class Transaction(models.Model):
+    """
+    Daily sales / purchase / waste record per business per category.
+
+    This table is the bridge between the Django inventory system and the
+    Milestone 2 ML pipeline.  The ML service reads daily_transactions.csv
+    (synthetic for now); once real data accumulates here a management
+    command can export it to that CSV or the ML service can query this table
+    directly via the Django ORM.
+    """
+    TX_TYPE_CHOICES = [
+        ('sale', 'Sale'),
+        ('purchase', 'Purchase'),
+        ('waste', 'Waste'),
+        ('donation', 'Donation'),
+    ]
+
+    business = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='transactions',
+    )
+    date = models.DateField(db_index=True)
+    category = models.CharField(max_length=100, db_index=True)
+    # Aggregated quantities for the day (ML pipeline uses daily aggregates)
+    sales_qty = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    purchase_qty = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    waste_qty = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    donation_qty = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    unit = models.CharField(max_length=30, default='kg')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        # One row per (business, date, category) — enforced at DB level
+        unique_together = [('business', 'date', 'category')]
+        ordering = ['-date', 'category']
+        indexes = [
+            models.Index(fields=['business', 'date', 'category']),
+        ]
+
+    def __str__(self):
+        return f'{self.business_id} | {self.date} | {self.category}'
