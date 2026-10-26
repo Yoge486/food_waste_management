@@ -88,7 +88,7 @@ def verify_tenant_access(business_id: str) -> str:
             ),
         )
 
-    allowed = settings.ALLOWED_BUSINESS_IDS
+    allowed = settings.allowed_business_ids_list
     if not allowed:
         # Dev / single-tenant mode — accept any valid ID but warn
         print(

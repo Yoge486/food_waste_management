@@ -39,15 +39,22 @@ class Settings(BaseSettings):
     # Comma-separated list of business IDs this API key is permitted to access.
     # E.g. in .env: ALLOWED_BUSINESS_IDS=biz_001,biz_002
     # Leave empty to allow any business_id (single-tenant / dev mode only).
-    ALLOWED_BUSINESS_IDS: List[str] = []
+    # Stored as a plain string and split on access to avoid pydantic-settings
+    # JSON-parsing a comma-separated value.
+    ALLOWED_BUSINESS_IDS: str = ""
+
+    @property
+    def allowed_business_ids_list(self) -> List[str]:
+        """Returns ALLOWED_BUSINESS_IDS as a list, splitting on commas."""
+        return [b.strip() for b in self.ALLOWED_BUSINESS_IDS.split(",") if b.strip()]
 
     @field_validator("ALLOWED_BUSINESS_IDS", mode="before")
     @classmethod
-    def parse_business_ids(cls, v: object) -> List[str]:
-        """Accept a comma-separated string or a list from the env file."""
-        if isinstance(v, str):
-            return [b.strip() for b in v.split(",") if b.strip()]
-        return v  # already a list
+    def parse_business_ids(cls, v: object) -> str:
+        """Accept either a string or a list and normalise to comma-separated string."""
+        if isinstance(v, list):
+            return ",".join(str(i).strip() for i in v if str(i).strip())
+        return str(v) if v is not None else ""
 
     @field_validator("API_KEY")
     @classmethod
