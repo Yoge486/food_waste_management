@@ -14,9 +14,9 @@
         "mape": 13.33
       },
       "lstm": {
-        "mae": 5.53,
-        "rmse": 8.08,
-        "mape": 15.31
+        "mae": 6.18,
+        "rmse": 7.97,
+        "mape": 15.69
       }
     },
     "best_model": "prophet"
@@ -36,9 +36,9 @@
         "mape": 32.85
       },
       "lstm": {
-        "mae": 7.79,
-        "rmse": 10.15,
-        "mape": 14.33
+        "mae": 9.49,
+        "rmse": 12.5,
+        "mape": 16.64
       }
     },
     "best_model": "lstm"
@@ -58,9 +58,9 @@
         "mape": 24.41
       },
       "lstm": {
-        "mae": 10.36,
-        "rmse": 13.42,
-        "mape": 13.42
+        "mae": 12.47,
+        "rmse": 15.92,
+        "mape": 18.55
       }
     },
     "best_model": "lstm"
@@ -80,9 +80,9 @@
         "mape": 15.44
       },
       "lstm": {
-        "mae": 5.99,
-        "rmse": 7.57,
-        "mape": 18.17
+        "mae": 7.74,
+        "rmse": 9.03,
+        "mape": 27.13
       }
     },
     "best_model": "prophet"
@@ -102,9 +102,9 @@
         "mape": 9.57
       },
       "lstm": {
-        "mae": 5.62,
-        "rmse": 6.85,
-        "mape": 12.71
+        "mae": 4.98,
+        "rmse": 6.28,
+        "mape": 10.42
       }
     },
     "best_model": "prophet"
@@ -124,9 +124,9 @@
         "mape": 10.03
       },
       "lstm": {
-        "mae": 4.16,
-        "rmse": 4.79,
-        "mape": 10.77
+        "mae": 3.62,
+        "rmse": 4.6,
+        "mape": 9.17
       }
     },
     "best_model": "lstm"
