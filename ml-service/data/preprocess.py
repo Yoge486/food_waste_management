@@ -13,10 +13,24 @@ Includes:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
+
+
+INDIAN_HOLIDAYS = {
+    (1, 26),   # Republic Day
+    (5, 1),    # Maharashtra Day / Labour Day
+    (8, 15),   # Independence Day
+    (10, 2),   # Gandhi Jayanti
+}
+INDIAN_FESTIVAL_DATES = {
+    date(2025, 3, 14),  # Holi
+    date(2025, 10, 20),  # Diwali
+    date(2026, 3, 4),  # Holi
+    date(2026, 11, 8),  # Diwali
+}
 
 
 REQUIRED_TX_COLUMNS = [
@@ -174,14 +188,34 @@ def prepare_category_series(
     daily["y"] = daily[target_col].astype(float)
     daily["day_of_week"] = daily["ds"].dt.dayofweek
     daily["is_weekend"] = daily["day_of_week"].isin([5, 6]).astype(int)
+    daily["is_indian_holiday"] = daily["ds"].map(
+        lambda value: int(
+            (value.month, value.day) in INDIAN_HOLIDAYS
+            or value.date() in INDIAN_FESTIVAL_DATES
+        )
+    )
+    daily["units_sold"] = daily[target_col].astype(float)
+    daily["units_wasted"] = daily["waste_qty"].astype(float)
 
-    return daily[["ds", "y", "day_of_week", "is_weekend", "purchase_qty", "waste_qty"]]
+    return daily[
+        [
+            "ds",
+            "y",
+            "units_sold",
+            "units_wasted",
+            "day_of_week",
+            "is_weekend",
+            "is_indian_holiday",
+            "purchase_qty",
+            "waste_qty",
+        ]
+    ]
 
 
 def time_based_split(
     df: pd.DataFrame,
     val_days: int = 30,
-    test_days: int = 14,
+    test_days: int = 30,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Splits time series chronologically to eliminate future lookahead bias:

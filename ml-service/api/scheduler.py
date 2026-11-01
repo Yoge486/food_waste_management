@@ -194,7 +194,9 @@ def run_batch_waste_risk_assessment(
     best_model_map = _load_best_model_map()
 
     tx_df: Optional[pd.DataFrame] = None
-    tx_file = settings.DATA_DIR / "daily_transactions.csv"
+    tx_file = settings.TRANSACTIONS_FILE
+    if not tx_file.exists():
+        tx_file = settings.DATA_DIR / "daily_transactions.csv"
     if tx_file.exists():
         try:
             tx_df = pd.read_csv(tx_file)

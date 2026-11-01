@@ -36,8 +36,22 @@
                             <div class="text-danger small mt-1">{{ field.errors|join:', ' }}</div>
                         {% endif %}
                     </div>
-                    {% endfor %}
+                        {% endfor %}
                 </div>
+                <div class="alert alert-info small mt-3 mb-0">
+                        Scan a barcode or QR code with your phone and enter the decoded value in the Barcode field.
+                </div>
+                <div class="d-flex align-items-center gap-2 mt-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-barcode-scan>
+                            <i class="bi bi-upc-scan me-1"></i> Scan barcode
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm d-none" data-barcode-stop>
+                            Stop camera
+                        </button>
+                        <button type="button" class="btn btn-outline-primary btn-sm" data-barcode-lookup data-barcode-lookup-url="{% url 'inventory_barcode_lookup' %}">Find existing</button>
+                        <span class="small text-muted" data-barcode-status aria-live="polite"></span>
+                </div>
+                <video data-barcode-video class="d-none mt-2 w-100 rounded" style="max-height: 220px;" playsinline></video>
 
                 <div class="mt-4 pt-3 border-top d-flex gap-2">
                     <button type="submit" class="btn btn-brand-primary px-4 py-2 shadow-sm">

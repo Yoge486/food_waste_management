@@ -142,6 +142,7 @@
                             <div>
                                 <strong class="text-dark d-block" style="font-size: 0.95rem;">{{ item.name }}</strong>
                                 <span class="badge bg-white text-secondary border px-1.5 py-0.5" style="font-size: 0.72rem;">{{ item.category }}</span>
+                                <span class="d-block text-primary small mt-1"><i class="bi bi-stars me-1"></i>{{ item.smart_action }}</span>
                                 {% if item.notes %}
                                     <span class="text-muted small ms-1" style="font-size: 0.75rem;">· {{ item.notes|truncatechars:35 }}</span>
                                 {% endif %}

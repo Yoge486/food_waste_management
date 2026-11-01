@@ -225,7 +225,7 @@
                                         </form>
                                         <form method="post" action="{% url 'admin_user_delete' p.user.id %}" class="d-inline ms-1">
                                             {% csrf_token %}
-                                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Permanently delete account" onclick="return confirm('Permanently remove {{ p.user.username }}? This cannot be undone.');">
+                                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Permanently delete account" onclick="return confirm('Permanently remove {{ p.user.username }} for malpractice or policy violation? This cannot be undone.');">
                                                 <i class="bi bi-trash"></i>
                                             </button>
                                         </form>

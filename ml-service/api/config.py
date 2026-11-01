@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     ]
 
     DATA_DIR: Path = BASE_DIR / "data"
+    TRANSACTIONS_FILE: Path = BASE_DIR / "data" / "live_transactions.csv"
     MODELS_DIR: Path = BASE_DIR / "models" / "saved"
     METRICS_FILE: Path = BASE_DIR / "models" / "metrics.json"
     BATCH_RESULTS_DIR: Path = BASE_DIR / "reports" / "batch_predictions"

@@ -181,7 +181,7 @@ Full interactive docs: http://127.0.0.1:8001/docs
 ## Running Tests
 
 ```bash
-# ML service tests (39 tests)
+# ML service tests (45 tests)
 cd ml-service
 pytest tests/ -q --tb=short
 
@@ -189,6 +189,53 @@ pytest tests/ -q --tb=short
 cd ..
 python manage.py test food_management
 ```
+
+## Operations Features
+
+```bash
+# Export live Django transactions for the ML service
+python manage.py export_transactions
+# Filter by business username and date when needed
+python manage.py export_transactions --business-id demo_business --since 2026-01-01
+# Write a health status file for monitoring or scheduled runs
+python manage.py export_transactions --status-file ml-service/data/live_transactions_status.json
+
+# Run deduplicated expiry alerts and create in-app/admin email notifications
+python manage.py send_expiry_alerts
+# Preview alerts without changing the database or sending notifications
+python manage.py send_expiry_alerts --dry-run
+```
+
+Configure category-specific expiry thresholds and shelf-life defaults from
+Django Admin under **Category configs**. Per-user expiry alert and email
+preferences are available under **Notification preferences**. The analytics
+page is available at `/analytics/`, and user notifications at
+`/notifications/`. Analytics supports optional `start_date` and `end_date`
+filters, monthly waste/donation trends, waste-diversion percentage, and CSV
+export with `?format=csv`. Alerts are deduplicated per inventory item,
+threshold, and calendar day.
+
+For Windows Task Scheduler, configure `powershell.exe` with
+`-ExecutionPolicy Bypass -File D:\infosys-project\scripts\export_live_transactions.ps1`
+and set the working directory to the project root. The script atomically replaces
+the ML CSV and writes the status JSON only after a successful export.
+
+POS systems can record sale and waste events directly:
+
+```http
+POST /api/pos/transactions/
+X-API-Key: <business POS key>
+Idempotency-Key: <unique event key>
+Content-Type: application/json
+
+{"event_type":"waste","category":"dairy","quantity":2.5,"unit":"kg"}
+```
+
+The endpoint accepts `sale` or `waste`, aggregates events by business/date/category,
+and rejects future dates, invalid quantities, and unsupported event types.
+
+Inventory forms include a browser-native barcode/QR scanner when supported by
+the device. The decoded value is stored in the inventory barcode field.
 
 ---
 
@@ -211,6 +258,6 @@ python manage.py test food_management
 
 | Milestone | Status |
 |:---|:---|
-| M1 — Inventory & Expiry Tracking | ✅ Core complete (POS API, barcode scan: P1) |
+| M1 — Inventory & Expiry Tracking | ✅ Core complete (POS API; barcode scanning remains planned) |
 | M2 — AI Waste Prediction Engine | ✅ Complete (Prophet, LSTM, risk score, reorder, batch scheduler) |
 | M3 — Marketplace, NGO matching, cloud deploy | 🔜 Planned |

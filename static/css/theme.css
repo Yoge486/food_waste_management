@@ -88,6 +88,239 @@ body {
     flex-direction: column;
 }
 
+/* Compact application shell */
+.app-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 1040;
+    display: flex;
+    flex-direction: column;
+    width: 248px;
+    padding: 1.25rem 0.9rem;
+    background: var(--surface-sidebar);
+    color: var(--text-light);
+    box-shadow: 4px 0 18px rgba(22, 46, 35, 0.1);
+}
+
+.sidebar-brand {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 0.45rem 1.5rem;
+}
+
+.sidebar-brand-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    color: var(--accent-amber);
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-md);
+}
+
+.sidebar-user {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin: 0 0.35rem 1.25rem;
+    padding: 0.75rem;
+    color: var(--text-light);
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-md);
+}
+
+.sidebar-user small {
+    color: rgba(250, 246, 238, 0.62);
+    font-size: 0.72rem;
+}
+
+.sidebar-nav {
+    overflow-y: auto;
+}
+
+.sidebar-label {
+    display: block;
+    margin: 0.75rem 0.65rem 0.4rem;
+    color: rgba(250, 246, 238, 0.45);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+}
+
+.sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.7rem 0.75rem;
+    color: rgba(250, 246, 238, 0.76);
+    border-radius: var(--radius-md);
+    font-size: 0.88rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-link i {
+    width: 1.1rem;
+    color: rgba(250, 246, 238, 0.58);
+    font-size: 1rem;
+    text-align: center;
+}
+
+.sidebar-link:hover,
+.sidebar-link.active {
+    color: #FFFFFF;
+    background: rgba(255, 255, 255, 0.13);
+}
+
+.sidebar-link:hover i,
+.sidebar-link.active i {
+    color: var(--accent-amber);
+}
+
+.sidebar-link-badge {
+    min-width: 1.2rem;
+    margin-left: auto;
+    padding: 0.1rem 0.35rem;
+    color: #FFFFFF;
+    background: var(--accent-tomato);
+    border-radius: 999px;
+    font-size: 0.68rem;
+    text-align: center;
+}
+
+.sidebar-bottom {
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-link--muted {
+    color: rgba(250, 246, 238, 0.55);
+}
+
+.sidebar-close,
+.sidebar-toggle {
+    border: 0;
+    color: var(--text-light);
+    background: transparent;
+}
+
+.sidebar-toggle {
+    position: fixed;
+    top: 0.85rem;
+    left: 0.85rem;
+    z-index: 1030;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: var(--radius-md);
+    color: var(--primary-green);
+    background: var(--surface-card);
+    box-shadow: var(--shadow-md);
+    font-size: 1.25rem;
+}
+
+.sidebar-scrim {
+    display: none;
+}
+
+.app-main {
+    width: calc(100% - 248px);
+    margin-left: 248px;
+    padding-right: clamp(1rem, 3vw, 3rem);
+    padding-left: clamp(1rem, 3vw, 3rem);
+}
+
+.password-field {
+    position: relative;
+}
+
+.password-field .form-control {
+    padding-right: 2.8rem;
+}
+
+.password-toggle {
+    position: absolute;
+    top: 50%;
+    right: 0.65rem;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 0;
+    color: var(--text-muted);
+    background: transparent;
+    transform: translateY(-50%);
+}
+
+.password-toggle:hover,
+.password-toggle:focus {
+    color: var(--primary-green);
+}
+
+.password-meter {
+    height: 4px;
+    overflow: hidden;
+    background: var(--bg-cream-darker);
+    border-radius: 999px;
+}
+
+.password-meter span {
+    display: block;
+    width: 0;
+    height: 100%;
+    background: var(--accent-tomato);
+    border-radius: inherit;
+    transition: width 0.2s ease, background 0.2s ease;
+}
+
+.password-meter span[data-score="2"] {
+    background: var(--accent-amber);
+}
+
+.password-meter span[data-score="3"],
+.password-meter span[data-score="4"] {
+    background: var(--accent-safe);
+}
+
+.app-main + .modal,
+.app-main ~ footer {
+    margin-left: 248px;
+}
+
+@media (max-width: 767.98px) {
+    .app-sidebar {
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+    }
+
+    body.sidebar-open .app-sidebar {
+        transform: translateX(0);
+    }
+
+    body.sidebar-open .sidebar-scrim {
+        position: fixed;
+        inset: 0;
+        z-index: 1035;
+        display: block;
+        background: rgba(15, 30, 23, 0.45);
+    }
+
+    .app-main {
+        width: 100%;
+        margin-left: 0;
+        padding-top: 4.25rem !important;
+    }
+
+    .app-main + .modal,
+    .app-main ~ footer {
+        margin-left: 0;
+    }
+}
+
 h1, h2, h3, h4, h5, h6, .brand-font, .display-num {
     font-family: var(--font-heading);
     letter-spacing: -0.025em;

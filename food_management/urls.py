@@ -1,12 +1,14 @@
 from django.urls import path
 
-from .pos_api import pos_inventory_ingest
+from .pos_api import pos_inventory_ingest, pos_transaction_ingest
 from .views import (
     admin_dashboard,
     admin_user_toggle_status,
     admin_user_delete,
     dashboard,
     dashboard_metrics,
+    analytics,
+    notifications,
     donation_request_create,
     donation_requests,
     donation_status_update,
@@ -15,6 +17,7 @@ from .views import (
     inventory_import,
     inventory_list,
     inventory_update,
+    inventory_barcode_lookup,
     leaderboard,
     login_view,
     logout_view,
@@ -25,10 +28,13 @@ from .views import (
 )
 
 urlpatterns = [
-    path('', dashboard, name='dashboard'),
+    path('dashboard/', dashboard, name='dashboard'),
     path('dashboard/metrics/', dashboard_metrics, name='dashboard_metrics'),
+    path('analytics/', analytics, name='analytics'),
+    path('notifications/', notifications, name='notifications'),
     # POS REST API (M1 Req 1.3) — API-key auth, idempotency
     path('api/pos/inventory/', pos_inventory_ingest, name='pos_inventory_ingest'),
+    path('api/pos/transactions/', pos_transaction_ingest, name='pos_transaction_ingest'),
     path('admin-panel/', admin_dashboard, name='admin_dashboard'),
     path('accounts/register/', register, name='register'),
     path('accounts/login/', login_view, name='login'),
@@ -38,6 +44,7 @@ urlpatterns = [
     path('inventory/add/', inventory_create, name='inventory_create'),
     path('inventory/<int:item_id>/edit/', inventory_update, name='inventory_update'),
     path('inventory/<int:item_id>/delete/', inventory_delete, name='inventory_delete'),
+    path('inventory/barcode-lookup/', inventory_barcode_lookup, name='inventory_barcode_lookup'),
     path('inventory/import/', inventory_import, name='inventory_import'),
     path('surplus/', surplus_list, name='surplus_list'),
     path('surplus/add/', surplus_listing_create, name='surplus_create'),
@@ -46,6 +53,6 @@ urlpatterns = [
     path('donations/request/', donation_request_create, name='donation_request_create'),
     path('donations/<int:request_id>/update/', donation_status_update, name='donation_status_update'),
     path('leaderboard/', leaderboard, name='leaderboard'),
-    path('admin/users/<int:user_id>/toggle/', admin_user_toggle_status, name='admin_user_toggle_status'),
-    path('admin/users/<int:user_id>/delete/', admin_user_delete, name='admin_user_delete'),
+    path('admin-panel/users/<int:user_id>/toggle/', admin_user_toggle_status, name='admin_user_toggle_status'),
+    path('admin-panel/users/<int:user_id>/delete/', admin_user_delete, name='admin_user_delete'),
     ]

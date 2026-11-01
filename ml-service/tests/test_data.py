@@ -85,6 +85,35 @@ def test_fill_missing_days():
     assert day_2["sales_qty"] == 0.0
 
 
+def test_category_series_has_required_features_and_daily_schema():
+    records = [
+        {
+            "date": "2026-01-25",
+            "business_id": "b1",
+            "category": "dairy",
+            "sales_qty": 10,
+            "purchase_qty": 20,
+            "waste_qty": 1,
+            "unit": "kg",
+        },
+        {
+            "date": "2026-01-26",
+            "business_id": "b1",
+            "category": "dairy",
+            "sales_qty": 12,
+            "purchase_qty": 0,
+            "waste_qty": 2,
+            "unit": "kg",
+        },
+    ]
+    series = prepare_category_series(pd.DataFrame(records), "dairy", "b1")
+
+    assert {"ds", "units_sold", "units_wasted", "day_of_week", "is_weekend", "is_indian_holiday"}.issubset(series.columns)
+    assert series["units_sold"].tolist() == [10.0, 12.0]
+    assert series["units_wasted"].tolist() == [1.0, 2.0]
+    assert series["is_indian_holiday"].tolist() == [0, 1]
+
+
 def test_handle_outliers():
     records = [
         {"date": f"2026-01-{i:02d}", "business_id": "b1", "category": "dairy", "sales_qty": 20.0, "purchase_qty": 20, "waste_qty": 1, "unit": "kg"}
@@ -114,6 +143,17 @@ def test_time_based_split_no_leakage():
     # Zero temporal overlap
     assert train["ds"].max() < val["ds"].min()
     assert val["ds"].max() < test["ds"].min()
+
+
+def test_time_based_split_defaults_to_last_30_days():
+    df = generate_synthetic_transactions(days=100, businesses=["b1"], seed=42)
+    daily = prepare_category_series(df, category="bakery", business_id="b1")
+
+    train, val, test = time_based_split(daily, val_days=20)
+
+    assert len(test) == 30
+    assert len(val) == 20
+    assert len(train) == 50
 
 
 def test_sliding_windows_for_lstm():

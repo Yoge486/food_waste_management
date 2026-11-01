@@ -14,6 +14,8 @@ class UserProfile(models.Model):
     organization_name = models.CharField(max_length=200, blank=True)
     phone_number = models.CharField(max_length=30, blank=True)
     address = models.TextField(blank=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     points = models.IntegerField(default=0)
     level = models.IntegerField(default=1)
     streak_days = models.IntegerField(default=0)

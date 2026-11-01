@@ -1,6 +1,7 @@
 from datetime import date
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 
@@ -32,6 +33,7 @@ class InventoryItem(models.Model):
     storage_location = models.CharField(max_length=200, default='Main storage')
     risk_level = models.CharField(max_length=20, choices=RISK_CHOICES, default='low')
     notes = models.TextField(blank=True)
+    barcode = models.CharField(max_length=128, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -40,6 +42,13 @@ class InventoryItem(models.Model):
         indexes = [
             models.Index(fields=['business', 'expiry_date']),
             models.Index(fields=['business', 'category']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['business', 'barcode'],
+                condition=~models.Q(barcode=''),
+                name='unique_inventory_barcode_per_business',
+            ),
         ]
 
     def __str__(self):
@@ -50,14 +59,17 @@ class InventoryItem(models.Model):
 
     def calculate_waste_risk_score(self):
         days_left = self.days_until_expiry()
+        from .services import get_category_thresholds
+
+        critical_days, high_days, medium_days = get_category_thresholds(self.category)
         score = 10
-        if days_left <= 3:
+        if days_left <= critical_days:
             score += 60
-        elif days_left <= 7:
+        elif days_left <= high_days:
             score += 45
-        elif days_left <= 14:
+        elif days_left <= medium_days / 2:
             score += 25
-        elif days_left <= 30:
+        elif days_left <= medium_days:
             score += 15
 
         quantity = float(self.quantity or 0)
@@ -104,6 +116,14 @@ class SurplusListing(models.Model):
     def __str__(self):
         return f'{self.food_name} - {self.status}'
 
+    @property
+    def remaining_quantity(self):
+        """Return quantity left after active donation requests are accounted for."""
+        allocated = self.requests.filter(status__in=['requested', 'scheduled']).aggregate(
+            total=models.Sum('requested_quantity')
+        )['total'] or 0
+        return max(0, self.quantity - allocated)
+
 
 class DonationRequest(models.Model):
     STATUS_CHOICES = [
@@ -114,6 +134,13 @@ class DonationRequest(models.Model):
     ]
 
     listing = models.ForeignKey(SurplusListing, on_delete=models.CASCADE, related_name='requests')
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='donation_requests',
+    )
     ngo_name = models.CharField(max_length=200)
     requested_quantity = models.DecimalField(max_digits=10, decimal_places=2)
     pickup_date = models.DateField()
@@ -233,3 +260,56 @@ class ExpiryAlert(models.Model):
 
     def __str__(self):
         return f'Alert: {self.item.name} @ {self.threshold_days}d — {self.alert_date}'
+
+
+class CategoryConfig(models.Model):
+    category = models.CharField(max_length=100, unique=True)
+    critical_days = models.PositiveIntegerField(default=3)
+    high_days = models.PositiveIntegerField(default=7)
+    medium_days = models.PositiveIntegerField(default=30)
+    shelf_life_days = models.PositiveIntegerField(null=True, blank=True)
+    default_unit = models.CharField(max_length=30, default='kg')
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['category']
+
+    def clean(self):
+        if self.critical_days > self.high_days:
+            raise ValidationError('Critical threshold cannot exceed the high threshold.')
+        if self.high_days > self.medium_days:
+            raise ValidationError('High threshold cannot exceed the medium threshold.')
+
+    def __str__(self):
+        return self.category
+
+
+class InAppNotification(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notifications',
+    )
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    link = models.CharField(max_length=255, blank=True)
+    notification_type = models.CharField(max_length=50, default='info')
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['user', 'is_read', '-created_at'])]
+
+
+class NotificationPreference(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notification_preferences',
+    )
+    receive_expiry_alerts = models.BooleanField(default=True)
+    receive_expiry_emails = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f'Notification preferences for {self.user.username}'

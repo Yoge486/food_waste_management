@@ -53,6 +53,9 @@
                 </div>
 
                 <div class="pt-3 border-top">
+                    {% if profile.role == 'ngo' %}
+                    <p class="small text-muted mb-3">Add latitude and longitude to show this NGO on the live redistribution map.</p>
+                    {% endif %}
                     <button type="submit" class="btn btn-brand-primary px-4 py-2 shadow-sm">
                         <i class="bi bi-check-lg me-1"></i> Save Changes
                     </button>

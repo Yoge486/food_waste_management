@@ -47,7 +47,7 @@ def register_view(request):
     Handles user registration with role assignment (Food Provider or NGO).
     """
     if request.user.is_authenticated:
-        return redirect('/app/')
+        return redirect('dashboard')
 
     if request.method == 'POST':
         form = UserRegistrationForm(request.POST)
@@ -56,7 +56,7 @@ def register_view(request):
             auth_login(request, user)
             role_title = user.profile.get_role_display() if hasattr(user, 'profile') else 'User'
             messages.success(request, f"Welcome to the platform, {user.username}! Your account ({role_title}) has been registered successfully.")
-            return redirect('/app/')
+            return redirect('dashboard')
         else:
             messages.error(request, "Please correct the errors in the registration form.")
     else:
@@ -70,7 +70,7 @@ def login_view(request):
     Handles user authentication by username or email.
     """
     if request.user.is_authenticated:
-        return redirect('/app/')
+        return redirect('dashboard')
 
     if request.method == 'POST':
         form = UserLoginForm(request.POST)
@@ -89,7 +89,7 @@ def login_view(request):
             if user is not None:
                 auth_login(request, user)
                 messages.success(request, f"Welcome back, {user.username}!")
-                next_url = request.GET.get('next') or request.POST.get('next') or '/app/'
+                next_url = request.GET.get('next') or request.POST.get('next') or '/'
                 return redirect(next_url)
             else:
                 messages.error(request, "Invalid username/email or password.")

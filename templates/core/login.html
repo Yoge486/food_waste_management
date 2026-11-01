@@ -64,7 +64,12 @@
                     </div>
                     <div class="mb-4">
                         <label class="form-label fw-semibold small text-dark">Account Password</label>
-                        {{ form.password }}
+                        <div class="password-field">
+                            {{ form.password }}
+                            <button type="button" class="password-toggle" data-password-toggle="#id_password" aria-label="Show password">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        </div>
                         {% if form.password.errors %}
                             <div class="text-danger small mt-1">{{ form.password.errors.0 }}</div>
                         {% endif %}
@@ -86,4 +91,5 @@
         </div>
     </div>
 </body>
+<script src="{% static 'js/password-tools.js' %}?v=20261031"></script>
 </html>

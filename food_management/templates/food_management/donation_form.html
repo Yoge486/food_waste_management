@@ -16,6 +16,13 @@
                 </div>
             </div>
 
+            {% if selected_listing %}
+                <div class="alert alert-warning small mb-4">
+                    <strong>Selected surplus lot:</strong> {{ selected_listing.food_name }} · {{ selected_listing.quantity }} {{ selected_listing.unit }} · {{ selected_listing.pickup_location }}
+                    <div class="mt-1 text-muted">Remaining available for allocation: {{ selected_listing.remaining_quantity }} {{ selected_listing.unit }}</div>
+                </div>
+            {% endif %}
+
             <form method="post">
                 {% csrf_token %}
                 {% if form.non_field_errors %}

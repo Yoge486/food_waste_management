@@ -1,11 +1,22 @@
 from django.contrib import admin
 
-from .models import DonationRequest, ExpiryAlert, InventoryItem, POSApiKey, POSIdempotencyKey, SurplusListing, Transaction
+from .models import (
+    CategoryConfig,
+    DonationRequest,
+    ExpiryAlert,
+    InAppNotification,
+    InventoryItem,
+    NotificationPreference,
+    POSApiKey,
+    POSIdempotencyKey,
+    SurplusListing,
+    Transaction,
+)
 
 
 @admin.register(InventoryItem)
 class InventoryItemAdmin(admin.ModelAdmin):
-    list_display = ('name', 'category', 'quantity', 'expiry_date', 'risk_level', 'business')
+    list_display = ('name', 'category', 'barcode', 'quantity', 'expiry_date', 'risk_level', 'business')
     list_filter = ('category', 'risk_level')
     search_fields = ('name', 'category', 'storage_location')
     autocomplete_fields = ['business']
@@ -55,3 +66,25 @@ class ExpiryAlertAdmin(admin.ModelAdmin):
     search_fields = ('item__name', 'item__category')
     date_hierarchy = 'alert_date'
     readonly_fields = ('sent_at',)
+
+
+@admin.register(CategoryConfig)
+class CategoryConfigAdmin(admin.ModelAdmin):
+    list_display = ('category', 'critical_days', 'high_days', 'medium_days', 'shelf_life_days', 'is_active')
+    list_filter = ('is_active',)
+    search_fields = ('category',)
+
+
+@admin.register(InAppNotification)
+class InAppNotificationAdmin(admin.ModelAdmin):
+    list_display = ('user', 'title', 'notification_type', 'is_read', 'created_at')
+    list_filter = ('notification_type', 'is_read')
+    search_fields = ('user__username', 'title', 'message')
+    readonly_fields = ('created_at',)
+
+
+@admin.register(NotificationPreference)
+class NotificationPreferenceAdmin(admin.ModelAdmin):
+    list_display = ('user', 'receive_expiry_alerts', 'receive_expiry_emails')
+    list_filter = ('receive_expiry_alerts', 'receive_expiry_emails')
+    search_fields = ('user__username',)

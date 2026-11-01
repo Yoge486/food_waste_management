@@ -1,4 +1,5 @@
 import csv
+import json
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from io import StringIO
@@ -9,11 +10,14 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import User
 from django.core.paginator import Paginator
+from django.conf import settings
+from django.db import transaction
 from django.db.models import Q, Sum
 from django.db.models.functions import TruncMonth
-from django.http import JsonResponse
+from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from core.models import UserProfile
 
@@ -26,8 +30,16 @@ from .forms import (
     UserProfileForm,
     UserRegistrationForm,
 )
-from .models import DonationRequest, InventoryItem, SurplusListing
-from .services import estimate_waste_risk, get_gamification_summary, get_leaderboard, record_transaction
+from .models import DonationRequest, InAppNotification, InventoryItem, SurplusListing, Transaction
+from .services import (
+    award_points,
+    estimate_waste_risk,
+    get_gamification_summary,
+    get_leaderboard,
+    get_category_thresholds,
+    notify_user,
+    record_transaction,
+)
 
 
 def dashboard(request):
@@ -38,28 +50,47 @@ def dashboard(request):
     # Scope inventory to the logged-in user; admins see all records
     if request.user.is_authenticated and not request.user.is_superuser:
         inventory = InventoryItem.objects.filter(business=request.user).order_by('-created_at')
+        donations = DonationRequest.objects.filter(
+            Q(listing__business=request.user) | Q(requested_by=request.user)
+        ).distinct()
+        surplus = SurplusListing.objects.filter(business=request.user)
     else:
         inventory = InventoryItem.objects.all().order_by('-created_at')
+        donations = DonationRequest.objects.all()
+        surplus = SurplusListing.objects.all()
     recent_inventory = inventory[:5]
     total_inventory = inventory.count()
     near_expiry = inventory.filter(expiry_date__lte=today + timedelta(days=7)).count()
     urgent_inventory = inventory.filter(expiry_date__lte=today + timedelta(days=3)).count()
     high_risk = inventory.filter(risk_level__in=['high', 'critical']).count()
-    active_surplus = SurplusListing.objects.filter(status='available').count()
-    donation_requests = DonationRequest.objects.count()
-    collected_donations = DonationRequest.objects.filter(status='collected').count()
-    recovered_quantity = DonationRequest.objects.filter(status='collected').aggregate(total=Sum('requested_quantity'))['total'] or 0
-    prediction = estimate_waste_risk(inventory)
+    active_surplus = surplus.filter(status='available').count()
+    donation_requests = donations.count()
+    collected_donations = donations.filter(status='collected').count()
+    recovered_quantity = donations.filter(status='collected').aggregate(total=Sum('requested_quantity'))['total'] or 0
+    prediction = estimate_waste_risk(
+        inventory,
+        use_ml=bool(getattr(settings, 'ML_SERVICE_API_KEY', '')),
+    )
     gamification = get_gamification_summary(request.user)
     leaderboard = get_leaderboard(limit=5)
     expiry_alerts = inventory.filter(
         expiry_date__lte=today + timedelta(days=7),
     ).order_by('expiry_date', 'name')[:5]
+    for item in recent_inventory:
+        days_left = (item.expiry_date - today).days
+        if days_left <= 0:
+            item.smart_action = 'Remove expired stock safely'
+        elif days_left <= 3:
+            item.smart_action = 'Post to surplus marketplace now'
+        elif days_left <= 7:
+            item.smart_action = 'Prioritize kitchen use this week'
+        else:
+            item.smart_action = 'Monitor normal rotation'
 
     first_month = (today.replace(day=1) - timedelta(days=150)).replace(day=1)
     monthly_recovery = {
         entry['month'].date(): float(entry['total'] or 0)
-        for entry in DonationRequest.objects.filter(
+        for entry in donations.filter(
             status='collected',
             created_at__date__gte=first_month,
         ).annotate(month=TruncMonth('created_at')).values('month').annotate(
@@ -107,20 +138,158 @@ def dashboard(request):
 
 def dashboard_metrics(request):
     today = timezone.localdate()
-    inventory = InventoryItem.objects.all()
-    recovered_quantity = DonationRequest.objects.filter(status='collected').aggregate(
+    if request.user.is_authenticated and not request.user.is_superuser:
+        inventory = InventoryItem.objects.filter(business=request.user)
+        donations = DonationRequest.objects.filter(
+            Q(listing__business=request.user) | Q(requested_by=request.user)
+        ).distinct()
+        surplus = SurplusListing.objects.filter(business=request.user)
+    else:
+        inventory = InventoryItem.objects.all()
+        donations = DonationRequest.objects.all()
+        surplus = SurplusListing.objects.all()
+    recovered_quantity = donations.filter(status='collected').aggregate(
         total=Sum('requested_quantity'),
     )['total'] or 0
     response = JsonResponse({
         'total_inventory': inventory.count(),
         'near_expiry': inventory.filter(expiry_date__lte=today + timedelta(days=7)).count(),
         'urgent_inventory': inventory.filter(expiry_date__lte=today + timedelta(days=3)).count(),
-        'active_surplus': SurplusListing.objects.filter(status='available').count(),
-        'donation_requests': DonationRequest.objects.exclude(status='collected').count(),
+        'active_surplus': surplus.filter(status='available').count(),
+        'donation_requests': donations.exclude(status='collected').count(),
         'recovered_quantity': float(recovered_quantity),
     })
     response['Cache-Control'] = 'no-store'
     return response
+
+
+@login_required
+def analytics(request):
+    if request.user.is_superuser:
+        inventory = InventoryItem.objects.all()
+        transactions = Transaction.objects.all()
+        donations = DonationRequest.objects.all()
+    else:
+        inventory = InventoryItem.objects.filter(business=request.user)
+        transactions = Transaction.objects.filter(business=request.user)
+        donations = DonationRequest.objects.filter(
+            Q(listing__business=request.user) | Q(requested_by=request.user),
+        ).distinct()
+    start_date = request.GET.get('start_date', '').strip()
+    end_date = request.GET.get('end_date', '').strip()
+    try:
+        start = date.fromisoformat(start_date) if start_date else None
+        end = date.fromisoformat(end_date) if end_date else None
+    except ValueError:
+        return HttpResponseBadRequest('Dates must use YYYY-MM-DD format.')
+    if start and end and start > end:
+        return HttpResponseBadRequest('Start date cannot be after end date.')
+    if start:
+        transactions = transactions.filter(date__gte=start)
+        donations = donations.filter(pickup_date__gte=start)
+    if end:
+        transactions = transactions.filter(date__lte=end)
+        donations = donations.filter(pickup_date__lte=end)
+
+    totals = transactions.aggregate(
+        purchases=Sum('purchase_qty'),
+        sales=Sum('sales_qty'),
+        waste=Sum('waste_qty'),
+        donated=Sum('donation_qty'),
+    )
+    recovery = donations.filter(status='collected').aggregate(
+        quantity=Sum('requested_quantity'),
+    )['quantity'] or 0
+    category_rows = list(
+        transactions.values('category').annotate(
+            purchases=Sum('purchase_qty'),
+            waste=Sum('waste_qty'),
+            donated=Sum('donation_qty'),
+        ).order_by('-waste')[:10]
+    )
+    monthly_rows = list(
+        transactions.annotate(month=TruncMonth('date')).values('month').annotate(
+            purchases=Sum('purchase_qty'),
+            sales=Sum('sales_qty'),
+            waste=Sum('waste_qty'),
+            donated=Sum('donation_qty'),
+        ).order_by('month')
+    )
+    monthly_recovery_rows = list(
+        donations.filter(status='collected').annotate(
+            month=TruncMonth('pickup_date'),
+        ).values('month').annotate(
+            recovered=Sum('requested_quantity'),
+        ).order_by('month')
+    )
+    totals = {key: float(value or 0) for key, value in totals.items()}
+    diversion_base = totals['waste'] + totals['donated']
+    diversion_percentage = (
+        totals['donated'] / diversion_base * 100 if diversion_base else 0
+    )
+    if request.GET.get('format') == 'csv':
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="analytics.csv"'
+        writer = csv.writer(response)
+        writer.writerow(['Metric', 'Value'])
+        for key, value in totals.items():
+            writer.writerow([key, value])
+        writer.writerow(['recovered', float(recovery)])
+        writer.writerow(['waste_diversion_percentage', round(diversion_percentage, 2)])
+        writer.writerow([])
+        writer.writerow(['Category', 'Purchases', 'Waste', 'Donated'])
+        for row in category_rows:
+            writer.writerow([
+                row['category'],
+                float(row['purchases'] or 0),
+                float(row['waste'] or 0),
+                float(row['donated'] or 0),
+            ])
+        writer.writerow([])
+        writer.writerow(['Month', 'Purchases', 'Sales', 'Waste', 'Donated'])
+        for row in monthly_rows:
+            writer.writerow([
+                row['month'].strftime('%Y-%m'),
+                float(row['purchases'] or 0),
+                float(row['sales'] or 0),
+                float(row['waste'] or 0),
+                float(row['donated'] or 0),
+            ])
+        return response
+    return render(request, 'food_management/analytics.html', {
+        'totals': totals,
+        'recovery': float(recovery),
+        'diversion_percentage': diversion_percentage,
+        'start_date': start_date,
+        'end_date': end_date,
+        'inventory_count': inventory.count(),
+        'high_risk_count': inventory.filter(risk_level__in=['high', 'critical']).count(),
+        'category_rows': category_rows,
+        'monthly_chart': json.dumps({
+            'labels': [row['month'].strftime('%b %Y') for row in monthly_rows],
+            'waste': [float(row['waste'] or 0) for row in monthly_rows],
+            'donated': [float(row['donated'] or 0) for row in monthly_rows],
+        }),
+        'category_chart': json.dumps({
+            'labels': [row['category'] for row in category_rows],
+            'waste': [float(row['waste'] or 0) for row in category_rows],
+            'donated': [float(row['donated'] or 0) for row in category_rows],
+        }),
+        'recovery_chart': json.dumps({
+            'labels': [row['month'].strftime('%b %Y') for row in monthly_recovery_rows],
+            'recovered': [float(row['recovered'] or 0) for row in monthly_recovery_rows],
+        }),
+    })
+
+
+@login_required
+def notifications(request):
+    if request.method == 'POST':
+        InAppNotification.objects.filter(user=request.user, is_read=False).update(is_read=True)
+        return redirect('notifications')
+    return render(request, 'food_management/notifications.html', {
+        'notifications': InAppNotification.objects.filter(user=request.user),
+    })
 
 
 @role_required('admin')
@@ -181,40 +350,44 @@ def admin_dashboard(request):
 
 
 @role_required('admin')
+@require_POST
 def admin_user_toggle_status(request, user_id):
-    if request.method == 'POST':
-        target_user = get_object_or_404(User, pk=user_id)
-        if target_user == request.user:
-            messages.error(request, 'You cannot suspend your own administrative account.')
-            return redirect('admin_dashboard')
+    target_user = get_object_or_404(User, pk=user_id)
+    if target_user == request.user:
+        messages.error(request, 'You cannot suspend your own administrative account.')
+        return redirect('admin_dashboard')
 
-        if target_user.is_superuser and not request.user.is_superuser:
-            messages.error(request, 'Permission denied: Cannot modify a superuser account.')
-            return redirect('admin_dashboard')
+    if target_user.is_superuser and not request.user.is_superuser:
+        messages.error(request, 'Permission denied: Cannot modify a superuser account.')
+        return redirect('admin_dashboard')
 
-        target_user.is_active = not target_user.is_active
-        target_user.save()
+    target_user.is_active = not target_user.is_active
+    target_user.save(update_fields=['is_active'])
 
-        status_text = "reactivated" if target_user.is_active else "suspended / deactivated due to malpractice"
-        messages.success(request, f"User account '{target_user.username}' has been {status_text}.")
+    status_text = "reactivated" if target_user.is_active else "suspended / deactivated due to malpractice"
+    messages.success(request, f"User account '{target_user.username}' has been {status_text}.")
     return redirect('admin_dashboard')
 
 
 @role_required('admin')
+@require_POST
 def admin_user_delete(request, user_id):
-    if request.method == 'POST':
-        target_user = get_object_or_404(User, pk=user_id)
-        if target_user == request.user:
-            messages.error(request, 'You cannot delete your own administrative account.')
-            return redirect('admin_dashboard')
+    target_user = get_object_or_404(User, pk=user_id)
+    if target_user == request.user:
+        messages.error(request, 'You cannot delete your own administrative account.')
+        return redirect('admin_dashboard')
 
-        if target_user.is_superuser and not request.user.is_superuser:
-            messages.error(request, 'Permission denied: Cannot delete a superuser account.')
-            return redirect('admin_dashboard')
+    if target_user.is_superuser and not request.user.is_superuser:
+        messages.error(request, 'Permission denied: Cannot delete a superuser account.')
+        return redirect('admin_dashboard')
 
-        username = target_user.username
+    username = target_user.username
+    with transaction.atomic():
         target_user.delete()
-        messages.success(request, f"User account '{username}' has been permanently removed due to malpractice / policy violation.")
+    messages.success(
+        request,
+        f"User account '{username}' has been permanently removed due to malpractice / policy violation.",
+    )
     return redirect('admin_dashboard')
 
 
@@ -264,9 +437,19 @@ def inventory_list(request):
 
     paginator = Paginator(items, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
-    expiry_alerts = InventoryItem.objects.filter(
+    expiry_alerts = items.filter(
         expiry_date__lte=today + timedelta(days=3),
     ).order_by('expiry_date', 'name')[:1]
+    for item in page_obj.object_list:
+        days_left = (item.expiry_date - today).days
+        if days_left <= 0:
+            item.smart_action = 'Remove expired stock safely'
+        elif days_left <= 3:
+            item.smart_action = 'Post to surplus marketplace now'
+        elif days_left <= 7:
+            item.smart_action = 'Prioritize kitchen use this week'
+        else:
+            item.smart_action = 'Monitor normal rotation'
 
     return render(
         request,
@@ -277,7 +460,7 @@ def inventory_list(request):
             'query': query,
             'risk': risk,
             'category': category,
-            'categories': InventoryItem.objects.order_by('category').values_list(
+            'categories': items.order_by('category').values_list(
                 'category', flat=True,
             ).distinct(),
             'location': location,
@@ -291,7 +474,7 @@ def inventory_list(request):
 @role_required('business', 'admin')
 def inventory_create(request):
     if request.method == 'POST':
-        form = InventoryForm(request.POST)
+        form = InventoryForm(request.POST, business=request.user)
         if form.is_valid():
             item = form.save(commit=False)
             item.business = request.user  # assign tenant owner
@@ -303,37 +486,60 @@ def inventory_create(request):
                 purchase_qty=float(item.quantity),
                 unit=item.unit,
             )
-            profile, _ = UserProfile.objects.get_or_create(user=request.user)
-            profile.points += 10
-            profile.level = max(1, profile.points // 100 + 1)
-            profile.streak_days += 1
-            profile.badges = list(profile.badges or [])
-            if 'Inventory Keeper' not in profile.badges:
-                profile.badges.append('Inventory Keeper')
-            profile.save()
+            award_points(request.user, 10, 'Inventory Keeper')
             return redirect('inventory_list')
     else:
-        form = InventoryForm()
+        form = InventoryForm(business=request.user)
     return render(request, 'food_management/inventory_form.html', {'form': form})
 
 
 @role_required('business', 'admin')
 def inventory_update(request, item_id):
-    item = get_object_or_404(InventoryItem, pk=item_id)
+    item_query = InventoryItem.objects.all()
+    if not request.user.is_superuser:
+        item_query = item_query.filter(business=request.user)
+    item = get_object_or_404(item_query, pk=item_id)
     if request.method == 'POST':
-        form = InventoryForm(request.POST, instance=item)
+        form = InventoryForm(request.POST, instance=item, business=request.user)
         if form.is_valid():
             form.save()
             messages.success(request, 'Inventory item updated.')
             return redirect('inventory_list')
     else:
-        form = InventoryForm(instance=item)
+        form = InventoryForm(instance=item, business=request.user)
     return render(request, 'food_management/inventory_form.html', {'form': form, 'editing': True})
 
 
 @role_required('business', 'admin')
+def inventory_barcode_lookup(request):
+    barcode = request.GET.get('barcode', '').strip()
+    if not barcode:
+        return JsonResponse({'status': 'error', 'detail': 'barcode is required.'}, status=400)
+    item_query = InventoryItem.objects.filter(barcode=barcode).order_by('expiry_date')
+    if not request.user.is_superuser:
+        item_query = item_query.filter(business=request.user)
+    item = item_query.first()
+    if item is None:
+        return JsonResponse({'status': 'not_found', 'barcode': barcode}, status=404)
+    return JsonResponse({
+        'status': 'found',
+        'item_id': item.pk,
+        'name': item.name,
+        'category': item.category,
+        'quantity': float(item.quantity),
+        'unit': item.unit,
+        'expiry_date': item.expiry_date.isoformat(),
+        'storage_location': item.storage_location,
+        'risk_level': item.risk_level,
+    })
+
+
+@role_required('business', 'admin')
 def inventory_delete(request, item_id):
-    item = get_object_or_404(InventoryItem, pk=item_id)
+    item_query = InventoryItem.objects.all()
+    if not request.user.is_superuser:
+        item_query = item_query.filter(business=request.user)
+    item = get_object_or_404(item_query, pk=item_id)
     if request.method == 'POST':
         item.delete()
         messages.success(request, 'Inventory item removed successfully.')
@@ -400,11 +606,12 @@ def inventory_import(request):
                     rejected_rows.append(f'Row {line_number}: invalid name, category, quantity, or date range.')
                     continue
 
+                critical_days, high_days, medium_days = get_category_thresholds(category_value)
                 days_until_expiry = (expiry_date_value - today).days
                 risk_level = (
-                    'critical' if days_until_expiry <= 3
-                    else 'high' if days_until_expiry <= 7
-                    else 'medium' if days_until_expiry <= 30
+                    'critical' if days_until_expiry <= critical_days
+                    else 'high' if days_until_expiry <= high_days
+                    else 'medium' if days_until_expiry <= medium_days
                     else 'low'
                 )
                 imported_items.append(InventoryItem(
@@ -418,6 +625,7 @@ def inventory_import(request):
                     storage_location=values.get('storage_location') or 'Main storage',
                     risk_level=risk_level,
                     notes=values.get('notes', ''),
+                    barcode=values.get('barcode', ''),
                 ))
 
             InventoryItem.objects.bulk_create(imported_items)
@@ -451,7 +659,24 @@ def inventory_import(request):
 
 def surplus_list(request):
     listings = SurplusListing.objects.filter(status='available').order_by('expiry_date')
-    return render(request, 'food_management/surplus_list.html', {'listings': listings})
+    ngo_locations = []
+    for profile in UserProfile.objects.filter(
+        role='ngo',
+        latitude__isnull=False,
+        longitude__isnull=False,
+    ).select_related('user'):
+        ngo_locations.append({
+            'name': profile.organization_name or profile.user.username,
+            'type': 'NGO',
+            'position': [float(profile.latitude), float(profile.longitude)],
+            'details': profile.address or 'Verified NGO',
+            'color': '#198754',
+        })
+    return render(request, 'food_management/surplus_list.html', {
+        'listings': listings,
+        'ngo_locations': ngo_locations,
+        'ngo_locations_json': json.dumps(ngo_locations),
+    })
 
 
 @role_required('business', 'admin')
@@ -462,13 +687,7 @@ def surplus_listing_create(request):
             listing = form.save(commit=False)
             listing.business = request.user  # assign tenant owner
             listing.save()
-            profile, _ = UserProfile.objects.get_or_create(user=request.user)
-            profile.points += 20
-            profile.level = max(1, profile.points // 100 + 1)
-            profile.badges = list(profile.badges or [])
-            if 'Food Rescuer' not in profile.badges:
-                profile.badges.append('Food Rescuer')
-            profile.save()
+            award_points(request.user, 20, 'Food Rescuer')
             return redirect('surplus_list')
     else:
         form = SurplusListingForm()
@@ -476,7 +695,17 @@ def surplus_listing_create(request):
 
 
 def donation_requests(request):
-    requests = DonationRequest.objects.select_related('listing').all().order_by('-created_at')
+    if request.user.is_superuser:
+        requests = DonationRequest.objects.select_related('listing', 'requested_by').all()
+    elif getattr(getattr(request.user, 'profile', None), 'role', None) == 'business':
+        requests = DonationRequest.objects.select_related('listing', 'requested_by').filter(
+            listing__business=request.user,
+        )
+    else:
+        requests = DonationRequest.objects.select_related('listing', 'requested_by').filter(
+            requested_by=request.user,
+        )
+    requests = requests.order_by('-created_at')
     status_filter = request.GET.get('status', '').strip()
     if status_filter:
         requests = requests.filter(status=status_filter)
@@ -485,41 +714,97 @@ def donation_requests(request):
 
 @role_required('ngo', 'business', 'admin')
 def donation_request_create(request):
+    selected_listing_id = request.GET.get('listing')
+    selected_listing = None
+    if selected_listing_id:
+        selected_listing = get_object_or_404(
+            SurplusListing.objects.filter(status='available'),
+            pk=selected_listing_id,
+        )
+
     if request.method == 'POST':
-        form = DonationRequestForm(request.POST)
+        form = DonationRequestForm(request.POST, selected_listing_id=selected_listing_id)
         if form.is_valid():
-            form.save()
-            return redirect('donation_requests')
+            with transaction.atomic():
+                listing = SurplusListing.objects.select_for_update().get(
+                    pk=form.cleaned_data['listing'].pk,
+                )
+                if listing.status != 'available' or form.cleaned_data['requested_quantity'] > listing.remaining_quantity:
+                    form.add_error(
+                        'requested_quantity',
+                        'This surplus quantity is no longer available. Please refresh and try again.',
+                    )
+                else:
+                    donation = form.save(commit=False)
+                    donation.requested_by = request.user
+                    donation.status = 'requested'
+                    donation.save()
+                    return redirect('donation_requests')
     else:
-        form = DonationRequestForm()
-    return render(request, 'food_management/donation_form.html', {'form': form})
+        form = DonationRequestForm(selected_listing_id=selected_listing_id)
+    return render(
+        request,
+        'food_management/donation_form.html',
+        {'form': form, 'selected_listing': selected_listing},
+    )
 
 
 @role_required('ngo', 'business', 'admin')
 def donation_status_update(request, request_id):
-    donation = get_object_or_404(DonationRequest, pk=request_id)
+    donation_query = DonationRequest.objects.select_related('listing', 'requested_by')
+    if not request.user.is_superuser:
+        role = getattr(getattr(request.user, 'profile', None), 'role', None)
+        if role == 'business':
+            donation_query = donation_query.filter(listing__business=request.user)
+        else:
+            donation_query = donation_query.filter(requested_by=request.user)
+    donation = get_object_or_404(donation_query, pk=request_id)
     if request.method == 'POST':
         next_status = request.POST.get('status')
-        if next_status in dict(DonationRequest.STATUS_CHOICES):
-            donation.status = next_status
-            donation.save()
-            if next_status == 'collected':
-                donation.listing.status = 'collected'
-                donation.listing.save()
-                # Record donation quantity in Transaction for ML pipeline
-                record_transaction(
-                    business=request.user,
-                    category=donation.listing.category,
-                    donation_qty=float(donation.requested_quantity),
-                    unit=donation.listing.unit,
-                )
-                profile, _ = UserProfile.objects.get_or_create(user=request.user)
-                profile.points += 25
-                profile.level = max(1, profile.points // 100 + 1)
-                profile.badges = list(profile.badges or [])
-                if 'Impact Hero' not in profile.badges:
-                    profile.badges.append('Impact Hero')
-                profile.save()
+        allowed_transitions = {
+            'requested': {'scheduled', 'cancelled'},
+            'scheduled': {'collected', 'cancelled'},
+            'collected': set(),
+            'cancelled': set(),
+        }
+        if next_status not in dict(DonationRequest.STATUS_CHOICES):
+            messages.error(request, 'Invalid donation status.')
+        elif next_status not in allowed_transitions[donation.status]:
+            messages.error(request, f'Cannot change a {donation.status} request to {next_status}.')
+        elif (
+            next_status in {'scheduled', 'collected'}
+            and not request.user.is_superuser
+            and donation.listing.business_id != request.user.id
+        ):
+            messages.error(request, 'Only the surplus owner or an administrator can confirm this handoff.')
+        else:
+            with transaction.atomic():
+                donation = DonationRequest.objects.select_for_update().select_related(
+                    'listing', 'requested_by',
+                ).get(pk=donation.pk)
+                if next_status not in allowed_transitions[donation.status]:
+                    messages.error(request, f'Cannot change a {donation.status} request to {next_status}.')
+                    return redirect('donation_requests')
+                if next_status == 'collected':
+                    listing = SurplusListing.objects.select_for_update().get(pk=donation.listing_id)
+                    if not listing.business_id or listing.status != 'available' or donation.requested_quantity > listing.remaining_quantity:
+                        messages.error(request, 'The surplus listing is no longer available for collection.')
+                        return redirect('donation_requests')
+                    listing.status = (
+                        'collected' if listing.remaining_quantity <= 0 else 'available'
+                    )
+                    listing.save(update_fields=['status'])
+                    record_transaction(
+                        business=listing.business,
+                        category=listing.category,
+                        donation_qty=float(donation.requested_quantity),
+                        unit=listing.unit,
+                    )
+                    for user in (listing.business, donation.requested_by):
+                        if user:
+                            award_points(user, 25, 'Impact Hero')
+                donation.status = next_status
+                donation.save(update_fields=['status'])
             messages.success(request, f'Donation request marked as {next_status}.')
     return redirect('donation_requests')
 

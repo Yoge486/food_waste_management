@@ -49,7 +49,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from .models import InventoryItem, POSApiKey, POSIdempotencyKey
-from .services import record_transaction
+from .services import get_category_thresholds, record_transaction
 
 
 # ---------------------------------------------------------------------------
@@ -76,13 +76,14 @@ def _authenticate(request) -> POSApiKey | None:
         return None
 
 
-def _auto_risk_level(expiry_date: date) -> str:
+def _auto_risk_level(expiry_date: date, category: str) -> str:
     days = (expiry_date - date.today()).days
-    if days <= 3:
+    critical_days, high_days, medium_days = get_category_thresholds(category)
+    if days <= critical_days:
         return 'critical'
-    if days <= 7:
+    if days <= high_days:
         return 'high'
-    if days <= 30:
+    if days <= medium_days:
         return 'medium'
     return 'low'
 
@@ -106,6 +107,8 @@ def pos_inventory_ingest(request):
 
     # 2. Idempotency check
     idempotency_key = request.headers.get('Idempotency-Key', '').strip()
+    if len(idempotency_key) > 128:
+        return _error('Idempotency-Key must be 128 characters or fewer.')
     if idempotency_key:
         try:
             cached = POSIdempotencyKey.objects.get(
@@ -156,7 +159,7 @@ def pos_inventory_ingest(request):
     storage_location = str(body.get('storage_location', 'Main storage')).strip() or 'Main storage'
     notes = str(body.get('notes', '')).strip()
 
-    risk_level = _auto_risk_level(expiry_date)
+    risk_level = _auto_risk_level(expiry_date, category)
 
     # 5. Create inventory item
     item = InventoryItem.objects.create(
@@ -196,13 +199,104 @@ def pos_inventory_ingest(request):
 
     # 8. Store idempotency record (only when client sent a key)
     if idempotency_key:
-        # Truncate to model field length for safety
         POSIdempotencyKey.objects.create(
-            key=idempotency_key[:128],
+            key=idempotency_key,
             api_key=pos_key,
             response_body=response_body,
         )
 
+    return JsonResponse(response_body, status=201)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def pos_transaction_ingest(request):
+    """
+    Record a POS sale or waste event for the authenticated business.
+
+    Request body:
+    {
+        "event_type": "sale",
+        "category": "dairy",
+        "quantity": 2.5,
+        "unit": "kg",
+        "date": "2026-10-31"
+    }
+    """
+    pos_key = _authenticate(request)
+    if pos_key is None:
+        return _error('Missing or invalid X-API-Key.', status=401)
+
+    idempotency_key = request.headers.get('Idempotency-Key', '').strip()
+    if len(idempotency_key) > 128:
+        return _error('Idempotency-Key must be 128 characters or fewer.')
+    if idempotency_key:
+        cached = POSIdempotencyKey.objects.filter(
+            key=idempotency_key,
+            api_key=pos_key,
+        ).first()
+        if cached:
+            return JsonResponse(cached.response_body, status=200)
+
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return _error('Request body must be valid JSON.')
+
+    event_type = str(body.get('event_type', '')).strip().lower()
+    if event_type not in {'sale', 'waste'}:
+        return _error("event_type must be either 'sale' or 'waste'.")
+
+    category = str(body.get('category', '')).strip().lower()
+    if not category:
+        return _error('category is required.')
+    if len(category) > 100:
+        return _error('category must be 100 characters or fewer.')
+
+    try:
+        quantity = Decimal(str(body.get('quantity', '')))
+        if not quantity.is_finite() or quantity <= 0:
+            raise ValueError
+    except (InvalidOperation, ValueError, TypeError):
+        return _error('quantity must be a positive number.')
+
+    unit = str(body.get('unit', 'kg')).strip() or 'kg'
+    if len(unit) > 30:
+        return _error('unit must be 30 characters or fewer.')
+    event_date = date.today()
+    if body.get('date'):
+        try:
+            event_date = date.fromisoformat(str(body['date']))
+        except (ValueError, TypeError):
+            return _error('date must be an ISO format date (YYYY-MM-DD).')
+    if event_date > date.today():
+        return _error('date cannot be in the future.')
+
+    transaction_kwargs = {
+        'business': pos_key.business,
+        'category': category,
+        'tx_date': event_date,
+        'unit': unit,
+    }
+    quantity_field = 'sales_qty' if event_type == 'sale' else 'waste_qty'
+    transaction_kwargs[quantity_field] = float(quantity)
+    transaction = record_transaction(**transaction_kwargs)
+    response_body = {
+        'status': 'recorded',
+        'event_type': event_type,
+        'transaction_id': transaction.pk,
+        'business_id': f'biz_{pos_key.business_id:03d}',
+        'category': category,
+        'quantity': float(quantity),
+        'unit': unit,
+        'date': event_date.isoformat(),
+    }
+    if idempotency_key:
+        POSIdempotencyKey.objects.create(
+            key=idempotency_key,
+            api_key=pos_key,
+            response_body=response_body,
+        )
     return JsonResponse(response_body, status=201)
 
 

@@ -23,6 +23,7 @@ import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, Header, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security.api_key import APIKeyHeader
+from pydantic import ValidationError
 
 from api.config import settings
 from api.schemas import (
@@ -97,6 +98,7 @@ def verify_tenant_access(business_id: str) -> str:
         )
         return business_id
 
+
     if business_id not in allowed:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -106,6 +108,28 @@ def verify_tenant_access(business_id: str) -> str:
             ),
         )
     return business_id
+
+
+def _filter_transactions_for_business(
+    tx_df: pd.DataFrame,
+    business_id: Optional[str],
+) -> pd.DataFrame:
+    """Restrict transaction history to the requested tenant when provided."""
+    if business_id is None:
+        return tx_df
+    if "business_id" not in tx_df.columns:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Transaction history does not contain business tenant data.",
+        )
+
+    filtered = tx_df[tx_df["business_id"].astype(str) == business_id]
+    if filtered.empty:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No transaction history found for business_id='{business_id}'.",
+        )
+    return filtered
 
 
 @asynccontextmanager
@@ -229,6 +253,9 @@ async def predict_demand(req: DemandPredictRequest):
     Forecasts daily product demand over the specified horizon.
     Selects Prophet or PyTorch LSTM based on model_type or benchmark performance.
     """
+    if req.business_id is not None:
+        verify_tenant_access(req.business_id)
+
     cat = req.category.lower()
     if cat not in CATEGORY_PROFILES:
         valid_cats = list(CATEGORY_PROFILES.keys())
@@ -247,7 +274,7 @@ async def predict_demand(req: DemandPredictRequest):
     today = date.today()
     forecast_items: List[DailyForecastItem] = []
 
-    # Try Prophet model
+    # Prophet artifacts are trained from the selected history snapshot.
     if model_choice == "prophet":
         model_file = settings.MODELS_DIR / f"prophet_{cat}.joblib"
         if not model_file.exists():
@@ -279,14 +306,27 @@ async def predict_demand(req: DemandPredictRequest):
         forecaster = LSTMForecaster.load(model_file)
 
         # Ingest recent historical data for lookback window
-        tx_file = settings.DATA_DIR / "daily_transactions.csv"
+        tx_file = settings.TRANSACTIONS_FILE
+        if not tx_file.exists():
+            tx_file = settings.DATA_DIR / "daily_transactions.csv"
         if not tx_file.exists():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Transaction history file not found. Please generate data first.",
             )
-        tx_df = pd.read_csv(tx_file)
+        tx_df = _filter_transactions_for_business(
+            pd.read_csv(tx_file),
+            req.business_id,
+        )
         cat_df = tx_df[tx_df["category"].str.lower() == cat].sort_values("date")
+        if cat_df.empty:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"No transaction history found for category='{cat}' "
+                    f"and business_id='{req.business_id}'."
+                ),
+            )
         recent_values = cat_df["sales_qty"].values[-forecaster.lookback :]
 
         preds = forecaster.predict(recent_history=recent_values, horizon=horizon)
@@ -374,8 +414,8 @@ async def get_batch_risk(
             with open(batch_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return BatchRiskResponse(**data)
-        except Exception:
-            pass
+        except (OSError, json.JSONDecodeError, TypeError, ValueError, ValidationError) as exc:
+            print(f"[batch] Cached report for '{business_id}' is invalid: {exc}. Recomputing.")
 
     # If cached report not found, compute on-demand
     data = run_batch_waste_risk_assessment(business_id=business_id, save_output=True)

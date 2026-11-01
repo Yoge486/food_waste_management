@@ -27,8 +27,10 @@ from typing import List
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.core.mail import mail_admins
 
-from food_management.models import ExpiryAlert, InventoryItem
+from food_management.models import ExpiryAlert, InventoryItem, NotificationPreference
+from food_management.services import get_category_thresholds, notify_user
 
 
 # Default configurable thresholds (days before expiry that trigger an alert)
@@ -42,10 +44,10 @@ class Command(BaseCommand):
         parser.add_argument(
             '--thresholds',
             type=str,
-            default=','.join(map(str, DEFAULT_THRESHOLDS)),
+            default='',
             help=(
-                'Comma-separated days-to-expiry thresholds that trigger alerts. '
-                f'Default: {DEFAULT_THRESHOLDS}'
+                'Optional comma-separated days-to-expiry thresholds. '
+                'When omitted, category configuration thresholds are used.'
             ),
         )
         parser.add_argument(
@@ -66,19 +68,20 @@ class Command(BaseCommand):
         category_filter: str = options['category'].strip().lower()
 
         # Parse and validate threshold list
-        try:
-            thresholds = sorted(
-                {int(t.strip()) for t in options['thresholds'].split(',') if t.strip()},
-                reverse=True,  # highest first so worst-case label wins
-            )
-        except ValueError:
-            raise CommandError('--thresholds must be a comma-separated list of integers.')
-
-        if not thresholds:
-            raise CommandError('No valid thresholds provided.')
+        thresholds = None
+        if options['thresholds'].strip():
+            try:
+                thresholds = sorted(
+                    {int(t.strip()) for t in options['thresholds'].split(',') if t.strip()},
+                    reverse=True,
+                )
+            except ValueError:
+                raise CommandError('--thresholds must be a comma-separated list of integers.')
+            if not thresholds or any(value < 0 for value in thresholds):
+                raise CommandError('--thresholds must contain non-negative integers.')
 
         today = date.today()
-        max_threshold = max(thresholds)
+        max_threshold = max(thresholds or DEFAULT_THRESHOLDS)
 
         # Fetch items expiring within the widest threshold window
         qs = InventoryItem.objects.filter(
@@ -94,21 +97,47 @@ class Command(BaseCommand):
 
         for item in qs:
             days_left = (item.expiry_date - today).days
+            item_thresholds = thresholds
+            if item_thresholds is None:
+                critical_days, high_days, medium_days = get_category_thresholds(item.category)
+                item_thresholds = sorted(
+                    {critical_days, high_days, medium_days},
+                    reverse=True,
+                )
 
             # Find the tightest threshold this item crosses
-            triggered = [t for t in thresholds if days_left <= t]
+            triggered = [t for t in item_thresholds if days_left <= t]
             if not triggered:
                 continue
             threshold = min(triggered)   # tightest applicable threshold
 
-            # Deduplication: skip if this alert was already sent today
-            already_sent = ExpiryAlert.objects.filter(
-                item=item,
-                threshold_days=threshold,
-                alert_date=today,
-            ).exists()
+            if not item.business:
+                total_skipped += 1
+                continue
 
-            if already_sent:
+            if dry_run:
+                preferences = NotificationPreference(
+                    receive_expiry_alerts=True,
+                    receive_expiry_emails=True,
+                )
+            else:
+                preferences, _ = NotificationPreference.objects.get_or_create(
+                    user=item.business,
+                )
+            if not preferences.receive_expiry_alerts:
+                total_skipped += 1
+                continue
+
+            if dry_run:
+                claimed = True
+            else:
+                with transaction.atomic():
+                    _, claimed = ExpiryAlert.objects.get_or_create(
+                        item=item,
+                        threshold_days=threshold,
+                        alert_date=today,
+                    )
+            if not claimed:
                 total_skipped += 1
                 continue
 
@@ -122,24 +151,26 @@ class Command(BaseCommand):
                 f'owner: {owner}'
             )
 
-            # Emit alert (console for now; extend here for email/webhook)
             self.stdout.write(self.style.WARNING(msg))
-
-            # Record deduplication row (skip in dry-run)
             if not dry_run:
-                with transaction.atomic():
-                    ExpiryAlert.objects.get_or_create(
-                        item=item,
-                        threshold_days=threshold,
-                        alert_date=today,
-                    )
+                notify_user(
+                    item.business,
+                    f'Expiry alert: {item.name}',
+                    msg,
+                    '/inventory/',
+                    'expiry',
+                )
+                if preferences.receive_expiry_emails:
+                    mail_admins(f'Food expiry alert: {item.name}', msg, fail_silently=False)
 
             total_sent += 1
 
         suffix = ' (dry-run — no records written)' if dry_run else ''
+        action = 'previewed' if dry_run else 'sent'
         self.stdout.write(
             self.style.SUCCESS(
-                f'\nDone{suffix}: {total_sent} alert(s) sent, {total_skipped} skipped (already alerted today).'
+                f'\nDone{suffix}: {total_sent} alert(s) {action}, '
+                f'{total_skipped} skipped (already alerted today).'
             )
         )
 

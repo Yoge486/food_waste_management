@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.db.models import F, Sum
+from django.utils import timezone
+from django.conf import settings
 
 from core.models import UserProfile
 
-from .models import DonationRequest, InventoryItem, SurplusListing, Transaction
+from .models import CategoryConfig, DonationRequest, InAppNotification, InventoryItem, SurplusListing, Transaction
 
 
 # ---------------------------------------------------------------------------
@@ -60,11 +62,33 @@ def record_transaction(
     return tx
 
 
+def get_category_thresholds(category):
+    config = CategoryConfig.objects.filter(
+        category__iexact=(category or '').strip(),
+        is_active=True,
+    ).first()
+    if config:
+        return config.critical_days, config.high_days, config.medium_days
+    return 3, 7, 30
+
+
+def notify_user(user, title, message, link='', notification_type='info'):
+    if not user:
+        return None
+    return InAppNotification.objects.create(
+        user=user,
+        title=title,
+        message=message,
+        link=link,
+        notification_type=notification_type,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Waste risk estimation (Milestone 1 heuristic, used as ML fallback)
 # ---------------------------------------------------------------------------
 
-def estimate_waste_risk(items):
+def estimate_waste_risk(items, use_ml=False):
     if not items:
         return {
             'avg_risk': 0,
@@ -74,8 +98,14 @@ def estimate_waste_risk(items):
 
     total = 0
     high_risk_count = 0
+    ml_used = bool(use_ml and getattr(settings, 'ML_SERVICE_API_KEY', ''))
     for item in items:
-        score = item.calculate_waste_risk_score()
+        if ml_used:
+            from .ml_client import ml_client
+
+            score = ml_client.calculate_inventory_risk(item)['risk_score']
+        else:
+            score = item.calculate_waste_risk_score()
         total += score
         if score >= 70:
             high_risk_count += 1
@@ -92,6 +122,7 @@ def estimate_waste_risk(items):
         'avg_risk': avg_risk,
         'high_risk_count': high_risk_count,
         'recommended_action': recommendation,
+        'is_ml': ml_used,
     }
 
 
@@ -108,7 +139,6 @@ def get_gamification_summary(user):
             'next_badge': 'Starter',
             'badges': [],
         }
-
     profile, _ = UserProfile.objects.get_or_create(user=user)
     level = max(1, int(profile.level or 1))
     points = int(profile.points or 0)
@@ -121,6 +151,26 @@ def get_gamification_summary(user):
         'next_badge': next_badge,
         'badges': badges,
     }
+
+
+def award_points(user, points, badge=None):
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+    today = timezone.localdate()
+    if profile.last_activity_date == today:
+        profile.streak_days = max(1, profile.streak_days)
+    elif profile.last_activity_date == today - timedelta(days=1):
+        profile.streak_days += 1
+    else:
+        profile.streak_days = 1
+    profile.last_activity_date = today
+    profile.points += points
+    profile.level = max(1, profile.points // 100 + 1)
+    if badge:
+        profile.badges = list(profile.badges or [])
+        if badge not in profile.badges:
+            profile.badges.append(badge)
+    profile.save()
+    return profile
 
 
 def get_leaderboard(limit=5, anonymize=False):

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from api.config import settings
-from api.main import app
+from api.main import _filter_transactions_for_business, app
 
 client = TestClient(app)
 AUTH_HEADERS = {"X-API-Key": settings.API_KEY}
@@ -56,6 +56,22 @@ def test_predict_demand_endpoint():
     assert "week_start" in week
     assert "total_demand" in week
     assert week["days"] >= 1
+
+
+def test_business_filter_restricts_transaction_history():
+    import pandas as pd
+
+    transactions = pd.DataFrame(
+        [
+            {"business_id": "biz_001", "sales_qty": 10},
+            {"business_id": "biz_002", "sales_qty": 20},
+        ]
+    )
+
+    filtered = _filter_transactions_for_business(transactions, "biz_001")
+
+    assert filtered["business_id"].tolist() == ["biz_001"]
+    assert filtered["sales_qty"].tolist() == [10]
 
 
 def test_risk_score_endpoint():

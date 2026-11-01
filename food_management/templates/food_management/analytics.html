@@ -1,0 +1,94 @@
+{% extends 'food_management/base.html' %}
+{% block title %}Impact Analytics{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div><span class="badge bg-success-subtle text-success">Operational intelligence</span><h2 class="h3 fw-bold mt-2">Impact analytics</h2></div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-success btn-sm" href="?start_date={{ start_date }}&end_date={{ end_date }}&format=csv">Export CSV</a>
+        <a class="btn btn-outline-secondary btn-sm" href="{% url 'dashboard' %}">Back to dashboard</a>
+    </div>
+</div>
+<form class="card p-3 mb-4" method="get">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-4"><label class="form-label small" for="start_date">From</label><input class="form-control" type="date" id="start_date" name="start_date" value="{{ start_date }}"></div>
+        <div class="col-md-4"><label class="form-label small" for="end_date">To</label><input class="form-control" type="date" id="end_date" name="end_date" value="{{ end_date }}"></div>
+        <div class="col-md-4"><button class="btn btn-brand w-100" type="submit">Apply date range</button></div>
+    </div>
+</form>
+<div class="row g-3 mb-4">
+    {% for label,value in totals.items %}
+    <div class="col-6 col-lg-3"><div class="hero-metric-card h-100"><div class="metric-label">{{ label|title }}</div><div class="metric-val text-success">{{ value|floatformat:2 }}</div></div></div>
+    {% endfor %}
+    <div class="col-6 col-lg-3"><div class="hero-metric-card h-100"><div class="metric-label">Recovered</div><div class="metric-val text-success">{{ recovery|floatformat:2 }}</div></div></div>
+    <div class="col-6 col-lg-3"><div class="hero-metric-card h-100"><div class="metric-label">Waste diverted</div><div class="metric-val text-success">{{ diversion_percentage|floatformat:1 }}%</div></div></div>
+</div>
+<div class="card p-4 mb-4">
+    <h3 class="h5 fw-bold">Monthly waste diversion</h3>
+    <canvas id="monthlyAnalyticsChart" height="90" aria-label="Monthly waste and donation chart"></canvas>
+</div>
+<div class="row g-4 mb-4">
+    <div class="col-lg-7">
+        <div class="card p-4 h-100">
+            <h3 class="h5 fw-bold">Category impact</h3>
+            <canvas id="categoryAnalyticsChart" height="150" aria-label="Category waste and donation chart"></canvas>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card p-4 h-100">
+            <h3 class="h5 fw-bold">Monthly recovered quantity</h3>
+            <canvas id="recoveryAnalyticsChart" height="150" aria-label="Monthly recovered quantity chart"></canvas>
+        </div>
+    </div>
+</div>
+<div class="card p-4">
+    <h3 class="h5 fw-bold">Category waste and recovery</h3>
+    <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Category</th><th>Purchases</th><th>Waste</th><th>Donated</th></tr></thead><tbody>
+    {% for row in category_rows %}<tr><td>{{ row.category|title }}</td><td>{{ row.purchases|default:0|floatformat:2 }}</td><td>{{ row.waste|default:0|floatformat:2 }}</td><td>{{ row.donated|default:0|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="4" class="text-muted">No transaction data yet.</td></tr>{% endfor %}
+    </tbody></table></div>
+</div>
+<p class="small text-muted mt-3">Waste diversion is calculated as donated quantity divided by donated plus wasted quantity for the selected period.</p>
+{% block extra_js %}
+<script>
+    const analyticsData = {{ monthly_chart|safe }};
+    const categoryData = {{ category_chart|safe }};
+    const recoveryData = {{ recovery_chart|safe }};
+    new Chart(document.getElementById('monthlyAnalyticsChart'), {
+        type: 'bar',
+        data: {
+            labels: analyticsData.labels,
+            datasets: [
+                { label: 'Donated', data: analyticsData.donated, backgroundColor: '#198754' },
+                { label: 'Waste', data: analyticsData.waste, backgroundColor: '#dc3545' }
+            ]
+        },
+        options: { responsive: true, scales: { y: { beginAtZero: true } } }
+    });
+    new Chart(document.getElementById('categoryAnalyticsChart'), {
+        type: 'bar',
+        data: {
+            labels: categoryData.labels,
+            datasets: [
+                { label: 'Donated', data: categoryData.donated, backgroundColor: '#198754' },
+                { label: 'Waste', data: categoryData.waste, backgroundColor: '#dc3545' }
+            ]
+        },
+        options: { responsive: true, scales: { y: { beginAtZero: true } } }
+    });
+    new Chart(document.getElementById('recoveryAnalyticsChart'), {
+        type: 'line',
+        data: {
+            labels: recoveryData.labels,
+            datasets: [{
+                label: 'Recovered',
+                data: recoveryData.recovered,
+                borderColor: '#0d6efd',
+                backgroundColor: 'rgba(13, 110, 253, 0.15)',
+                fill: true,
+                tension: 0.25
+            }]
+        },
+        options: { responsive: true, scales: { y: { beginAtZero: true } } }
+    });
+</script>
+{% endblock %}
+{% endblock %}

@@ -2,6 +2,22 @@
 
 {% block title %}Surplus Marketplace · Live Split View{% endblock %}
 
+{% block extra_head %}
+<link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+>
+<style>
+    #mapCanvasArea .leaflet-container {
+        height: 380px;
+        width: 100%;
+        background: #EDE6D6;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <!-- Page Header -->
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -262,8 +278,62 @@
 {% endblock %}
 
 {% block extra_js %}
+<script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    const mapArea = document.getElementById('mapCanvasArea');
+    if (mapArea && window.L) {
+        mapArea.innerHTML = '<div id="redistributionMap" role="application" aria-label="Surplus donor and NGO locations"></div>';
+
+        const map = L.map('redistributionMap').setView([13.0827, 80.2707], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(map);
+
+        const locations = [
+            {
+                name: 'Spice Garden Restaurant',
+                type: 'Donor',
+                position: [13.0827, 80.2707],
+                details: '3 kg Biryani · 4h left',
+                color: '#dc3545'
+            },
+            ...{{ ngo_locations_json|safe }}
+        ];
+
+        if (locations.length === 1) {
+            const emptyState = document.createElement('div');
+            emptyState.className = 'position-absolute top-50 start-50 translate-middle bg-white rounded shadow-sm p-3 text-center small text-muted';
+            emptyState.textContent = 'No NGOs have configured map coordinates yet.';
+            mapArea.appendChild(emptyState);
+        }
+
+        locations.forEach(function (location) {
+            const marker = L.circleMarker(location.position, {
+                radius: location.type === 'Donor' ? 10 : 8,
+                color: '#ffffff',
+                weight: 3,
+                fillColor: location.color,
+                fillOpacity: 1
+            }).addTo(map);
+            marker.bindPopup('<strong>' + location.name + '</strong><br>' + location.type + '<br>' + location.details);
+        });
+
+        L.circle(locations[0].position, {
+            radius: 5000,
+            color: '#1F4D3A',
+            weight: 1,
+            dashArray: '4 4',
+            fillColor: '#1F4D3A',
+            fillOpacity: 0.06
+        }).addTo(map);
+    }
+
     // 1. Live countdown simulation for claim timers
     let secondsLeft = 45 * 60 - 28;
     function tickTimers() {
