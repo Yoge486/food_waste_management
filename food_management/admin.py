@@ -70,7 +70,10 @@ class ExpiryAlertAdmin(admin.ModelAdmin):
 
 @admin.register(CategoryConfig)
 class CategoryConfigAdmin(admin.ModelAdmin):
-    list_display = ('category', 'critical_days', 'high_days', 'medium_days', 'shelf_life_days', 'is_active')
+    list_display = (
+        'category', 'perishability', 'critical_days', 'high_days',
+        'medium_days', 'shelf_life_days', 'is_active',
+    )
     list_filter = ('is_active',)
     search_fields = ('category',)
 

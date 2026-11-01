@@ -1,0 +1,4 @@
+date,business_id,category,sales_qty,purchase_qty,waste_qty,donation_qty,unit
+2026-10-31,biz_004,dairy,0.00,48.00,0.00,0.00,litres
+2026-10-31,biz_004,packaged,0.00,20.00,0.00,0.00,kg
+2026-10-31,biz_004,prepared,0.00,60.00,0.00,0.00,kg

@@ -110,11 +110,9 @@ class InventoryValidationTests(TestCase):
         self.assertEqual(form.cleaned_data['risk_level'], 'critical')
 
     def test_inventory_form_uses_category_specific_thresholds(self):
-        CategoryConfig.objects.create(
+        CategoryConfig.objects.update_or_create(
             category='dairy',
-            critical_days=1,
-            high_days=2,
-            medium_days=5,
+            defaults={'critical_days': 1, 'high_days': 2, 'medium_days': 5},
         )
         form = InventoryForm(data={
             'name': 'Milk',
@@ -130,12 +128,20 @@ class InventoryValidationTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data['risk_level'], 'high')
 
-    def test_inventory_risk_score_uses_category_specific_thresholds(self):
+    def test_inventory_form_exposes_managed_category_suggestions(self):
         CategoryConfig.objects.create(
+            category='cold-chain',
+            perishability='highly_perishable',
+            storage_guidance='Keep refrigerated',
+        )
+        form = InventoryForm()
+        self.assertIn('cold-chain', form.category_suggestions)
+        self.assertEqual(form.fields['category'].widget.attrs['list'], 'category-suggestions')
+
+    def test_inventory_risk_score_uses_category_specific_thresholds(self):
+        CategoryConfig.objects.update_or_create(
             category='dairy',
-            critical_days=1,
-            high_days=2,
-            medium_days=5,
+            defaults={'critical_days': 1, 'high_days': 2, 'medium_days': 5},
         )
         item = InventoryItem.objects.create(
             business=self.business,

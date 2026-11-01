@@ -207,7 +207,9 @@ python manage.py send_expiry_alerts --dry-run
 ```
 
 Configure category-specific expiry thresholds and shelf-life defaults from
-Django Admin under **Category configs**. Per-user expiry alert and email
+Django Admin under **Category configs**. Category configs also provide managed
+perishability, storage guidance, and the category suggestions shown on inventory
+forms. Per-user expiry alert and email
 preferences are available under **Notification preferences**. The analytics
 page is available at `/analytics/`, and user notifications at
 `/notifications/`. Analytics supports optional `start_date` and `end_date`
@@ -218,7 +220,12 @@ threshold, and calendar day.
 For Windows Task Scheduler, configure `powershell.exe` with
 `-ExecutionPolicy Bypass -File D:\infosys-project\scripts\export_live_transactions.ps1`
 and set the working directory to the project root. The script atomically replaces
-the ML CSV and writes the status JSON only after a successful export.
+the ML CSV and writes the status JSON only after a successful export. The ML
+service automatically prefers this live transaction file for LSTM forecasts,
+reorder recommendations, and scheduled batch risk scoring, falling back to the
+synthetic dataset only when no live export exists. Backfill legacy records with
+an explicit owner using `python manage.py backfill_inventory_owners
+--business-id <username>`.
 
 POS systems can record sale and waste events directly:
 

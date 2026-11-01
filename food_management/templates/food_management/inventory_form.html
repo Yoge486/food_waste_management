@@ -29,6 +29,13 @@
                     <div class="{% if field.name == 'notes' %}col-12{% else %}col-md-6{% endif %}">
                         <label for="{{ field.id_for_label }}" class="form-label small fw-semibold text-dark">{{ field.label }}</label>
                         {{ field }}
+                        {% if field.name == 'category' %}
+                            <datalist id="category-suggestions">
+                                {% for category in form.category_suggestions %}
+                                    <option value="{{ category }}"></option>
+                                {% endfor %}
+                            </datalist>
+                        {% endif %}
                         {% if field.help_text %}
                             <div class="form-text small">{{ field.help_text }}</div>
                         {% endif %}

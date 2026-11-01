@@ -264,6 +264,8 @@ class ExpiryAlert(models.Model):
 
 class CategoryConfig(models.Model):
     category = models.CharField(max_length=100, unique=True)
+    perishability = models.CharField(max_length=30, default='perishable')
+    storage_guidance = models.CharField(max_length=200, blank=True)
     critical_days = models.PositiveIntegerField(default=3)
     high_days = models.PositiveIntegerField(default=7)
     medium_days = models.PositiveIntegerField(default=30)

@@ -15,10 +15,10 @@
 | 2.1 Configurable days-to-expiry thresholds | Done | `CategoryConfig` model/admin plus `forms.py` and `services.py:get_category_thresholds` | Defaults remain 3/7/30 days when no category override exists |
 | 2.2 Status labels (fresh/warning/critical/expired) | Done | `models.py` `RISK_CHOICES`, auto-assigned in `forms.py:clean` and `views.py:inventory_import` | — |
 | 2.3 Scheduled alerts with deduplication | Done | `send_expiry_alerts` management command + `ExpiryAlert` model | Run daily via cron or Windows Task Scheduler; per-user delivery preferences supported |
-| 3.1 Food taxonomy with perishability & storage | Partial | `CATEGORY_PROFILES` in `ml-service/data/generate_data.py` only; not exposed in Django UI | No category taxonomy model in Django |
-| 3.2 Auto-suggest category | Missing | `category` field is free-text `CharField`; no suggestions | Could use datalist or AJAX from `CATEGORY_PROFILES` |
+| 3.1 Food taxonomy with perishability & storage | Done | Managed `CategoryConfig` records expose perishability and storage guidance in Django Admin | Defaults are seeded by migration |
+| 3.2 Auto-suggest category | Done | `InventoryForm` category datalist is populated from active `CategoryConfig` records | Users may still enter a new category when needed |
 | 4.1 Barcode/QR scanning (mobile-friendly) | Done | `static/js/barcode-scanner.js`, inventory form camera controls, tenant-scoped lookup endpoint | Uses the browser `BarcodeDetector` API where supported |
-| 5.1 Multi-tenant inventory (RLS or equivalent) | Partial | Inventory list/edit/delete and dashboard metrics are scoped by `request.user`; legacy nullable owners remain | Backfill legacy rows; keep ownership checks on every object action |
+| 5.1 Multi-tenant inventory (RLS or equivalent) | Done | Inventory list/edit/delete and dashboard metrics are scoped by `request.user`; legacy rows have an explicit backfill command | Keep ownership checks on every object action |
 | 5.2 Transaction history (sale/purchase/waste/donation) | Done | `models.py:Transaction`, `services.py:record_transaction`, migration 0002 | Inventory purchase/import, POS, and donation collection flows record transactions |
 | 5.3 Surplus donation logs | Done | `SurplusListing`, `DonationRequest` models + views | — |
 
@@ -26,7 +26,7 @@
 
 | Requirement | Status | Evidence (file:line) | Gap |
 |:---|:---|:---|:---|
-| 1.1 Category-wise daily time series | Done | `ml-service/data/preprocess.py:prepare_category_series` | Data is synthetic CSV; not yet reading real Django `Transaction` table |
+| 1.1 Category-wise daily time series | Done | `ml-service/data/preprocess.py:prepare_category_series` and live export bridge | ML inference prefers exported Django `Transaction` rows and uses synthetic data only as fallback |
 | 2.1 Prophet forecasting | Done | `ml-service/models/baseline_prophet.py`, artifacts in `models/saved/` | — |
 | 2.2 LSTM forecasting | Done | `ml-service/models/lstm_model.py`, `.pt` artifacts | — |
 | 2.3 Daily + weekly forecast | Done | `/predict/demand` returns `weekly_summary` alongside daily forecasts | — |
@@ -74,7 +74,7 @@
 | M2 | Report overclaims Prophet beats naive on all categories | `MILESTONE2_REPORT.md §3` / `metrics.json` | ⚠️ Not fixed — Prophet loses to naive on bakery/produce |
 | M3 | Scheduler tenant filter fell back to all-items on miss | `scheduler.py:55-58` | ✅ Fixed — commit `401901d` |
 | M4 | No weekly-aggregated forecast output | `/predict/demand` response | ✅ Fixed — response includes `weekly_summary` |
-| M5 | Django transactions are not yet consumed by the ML service — pipeline still uses synthetic CSV | `models.py`, `ml-service/data/` | ⚠️ Open — export or query real transactions in the next integration phase |
+| M5 | Live transaction export depends on the scheduled bridge script | `scripts/export_live_transactions.ps1`, `ml-service/api/config.py` | ✅ Fixed — ML inference prefers the atomically exported live file |
 | M6 | Silent exception swallowing in batch cache read | `main.py:get_batch_risk` | ✅ Fixed — invalid cache reports are logged and recomputed |
 | M7 | `business_id` field in `DemandPredictRequest` accepted but never used | `main.py` / `schemas.py` | ✅ Fixed — tenant is validated and LSTM history is filtered |
 
@@ -100,7 +100,7 @@
 | Fix Django `SECRET_KEY` to load from env (done) | Security — hardcoded in `settings.py` | 15 min | `config/settings.py`, `.env` |
 | Wire `Transaction` rows on inventory CRUD (done) | M2 data pipeline needs real sales/waste history | 1 hr | `food_management/views.py`, `models.py` |
 | Run `python manage.py migrate` | Apply all current migrations to DB | Done — migrations applied locally on 1 Nov 2026 | DB |
-| Fix MILESTONE2_REPORT.md §3 Prophet claim | Submission accuracy | 15 min | `ml-service/MILESTONE2_REPORT.md` |
+| Fix MILESTONE2_REPORT.md §3 Prophet claim | Submission accuracy | Done | `ml-service/MILESTONE2_REPORT.md` |
 
 ### P1 — Should add if time allows
 
@@ -109,15 +109,14 @@
 | POS REST API endpoint (done) | M1 Req 1.3 — completes Milestone 1 | 2 hrs | `food_management/pos_api.py`, `urls.py` |
 | Weekly-horizon forecast output (done) | M2 Req 2.3 — adds aggregate weekly view | 1 hr | `ml-service/api/main.py`, `schemas.py` |
 | Scheduled expiry alerts (management command) (done) | M1 Req 2.3 | 2 hrs | `management/commands/send_expiry_alerts.py` |
-| Seed/demo data script (full flow) | Demo & evaluation | 1.5 hrs | New `scripts/seed_demo.py` |
+| Seed/demo data script (full flow) | Demo & evaluation | Done | `food_management/management/commands/seed_demo_data.py` |
 
 ### P2 — Milestone 3 / polish
 
 | Item | Why | Effort | Files |
 |:---|:---|:---|:---|
-| Food taxonomy and category suggestions | M1 Req 3.1/3.2 | 3 hrs | Add a managed taxonomy and category suggestions to Django forms |
 | Item-level LSTM forecasting | Better accuracy than category-level | 4 hrs | `ml-service/models/` |
-| Automatic ML ingestion from Django transactions | Removes manual export dependency | 3 hrs | `ml-service/data/preprocess.py`, service integration |
+| Automatic ML ingestion from Django transactions | Removes manual export dependency | Done via scheduled live export bridge | `scripts/export_live_transactions.ps1`, `ml-service/api/` |
 
 ---
 

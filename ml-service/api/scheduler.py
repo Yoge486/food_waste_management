@@ -140,6 +140,17 @@ def _heuristic_demand(cat: str, horizon: int) -> float:
     return round(daily_rate * max(1, horizon), 2)
 
 
+def _load_transaction_history() -> Optional[pd.DataFrame]:
+    """Load exported live Django transactions, falling back to demo history."""
+    for tx_file in (settings.TRANSACTIONS_FILE, settings.DATA_DIR / "daily_transactions.csv"):
+        if tx_file.exists():
+            try:
+                return pd.read_csv(tx_file)
+            except Exception as exc:
+                print(f"[scheduler] Warning: could not read {tx_file}: {exc}")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Main batch function
 # ---------------------------------------------------------------------------
@@ -194,14 +205,7 @@ def run_batch_waste_risk_assessment(
     best_model_map = _load_best_model_map()
 
     tx_df: Optional[pd.DataFrame] = None
-    tx_file = settings.TRANSACTIONS_FILE
-    if not tx_file.exists():
-        tx_file = settings.DATA_DIR / "daily_transactions.csv"
-    if tx_file.exists():
-        try:
-            tx_df = pd.read_csv(tx_file)
-        except Exception as exc:
-            print(f"[scheduler] Warning: could not load transaction history: {exc}")
+    tx_df = _load_transaction_history()
 
     # Per-category model caches (load each model at most once per batch run)
     prophet_cache: Dict[str, ProphetForecaster] = {}

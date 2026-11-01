@@ -14,6 +14,11 @@ class InventoryForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.business = kwargs.pop('business', None)
         super().__init__(*args, **kwargs)
+        self.category_suggestions = list(
+            CategoryConfig.objects.filter(is_active=True)
+            .order_by('category')
+            .values_list('category', flat=True)
+        )
 
     class Meta:
         model = InventoryItem
@@ -31,7 +36,7 @@ class InventoryForm(forms.ModelForm):
         ]
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control'}),
-            'category': forms.TextInput(attrs={'class': 'form-control'}),
+            'category': forms.TextInput(attrs={'class': 'form-control', 'list': 'category-suggestions'}),
             'quantity': forms.NumberInput(attrs={'class': 'form-control'}),
             'unit': forms.TextInput(attrs={'class': 'form-control'}),
             'purchase_date': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}),

@@ -459,7 +459,9 @@ async def recommend_reorder_endpoint(req: ReorderRecommendRequest):
                     print(f"[reorder] Prophet inference failed for '{cat}': {exc}. Using heuristic.")
         else:
             model_file = settings.MODELS_DIR / f"lstm_{cat}.pt"
-            tx_file = settings.DATA_DIR / "daily_transactions.csv"
+            tx_file = settings.TRANSACTIONS_FILE
+            if not tx_file.exists():
+                tx_file = settings.DATA_DIR / "daily_transactions.csv"
             if model_file.exists() and tx_file.exists():
                 try:
                     forecaster_lstm = LSTMForecaster.load(model_file)
