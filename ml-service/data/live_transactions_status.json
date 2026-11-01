@@ -1,8 +1,0 @@
-{
-  "status": "success",
-  "completed_at": "2026-11-01T05:09:06.544138+00:00",
-  "rows": 3,
-  "output": "ml-service\\data\\live_transactions.csv",
-  "business_id": null,
-  "since": null
-}

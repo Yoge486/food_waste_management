@@ -22,3 +22,5 @@ db.sqlite3-journal
 Thumbs.db
 .agents/
 skills-lock.json
+ml-service/data/live_transactions.csv
+ml-service/data/live_transactions_status.json
